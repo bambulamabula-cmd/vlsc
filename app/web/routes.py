@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db_session
 from app.models import Check, Job, Server
 from app.services.retention import RetentionService
+from app.services.scan_runner import scan_runner_service
 from app.vless.parser import VlessParseError, parse_vless_uri
 
 router = APIRouter()
@@ -221,7 +222,8 @@ async def import_uris(
 @router.post("/api/scan/start")
 def start_scan(mode: str = Form(default="quick"), db: Session = Depends(get_db_session)):
     now = datetime.now(timezone.utc)
-    job = Job(kind="scan", status="running", payload={"mode": mode}, started_at=now)
+    attempts = 5 if mode == "quick" else 8
+    job = Job(kind="scan", status="running", payload={"mode": mode, "attempts": attempts}, started_at=now)
 
     try:
         with db.begin():
@@ -231,6 +233,7 @@ def start_scan(mode: str = Form(default="quick"), db: Session = Depends(get_db_s
         raise HTTPException(status_code=409, detail="Scan already running") from None
 
     db.refresh(job)
+    scan_runner_service.start(job.id, attempts=attempts)
     return {"job_id": job.id, "scan_state": _scan_state_from_job(job)}
 
 
@@ -238,8 +241,11 @@ def start_scan(mode: str = Form(default="quick"), db: Session = Depends(get_db_s
 def stop_scan(db: Session = Depends(get_db_session)):
     running_job = _active_scan_job(db)
     if running_job:
+        scan_runner_service.cancel(running_job.id)
         running_job.status = "stopped"
         running_job.finished_at = datetime.now(timezone.utc)
+        existing_result = running_job.result if isinstance(running_job.result, dict) else {}
+        running_job.result = {**existing_result, "cancelled": True}
         db.commit()
         db.refresh(running_job)
 
