@@ -8,6 +8,7 @@ from app.db import init_db
 from app.utils.logging import configure_logging
 from app.utils.preflight import log_preflight_warnings
 from app.web.routes import router as web_router
+from app.config import settings
 
 
 @asynccontextmanager
