@@ -58,6 +58,9 @@ class Check(Base):
     status: Mapped[str] = mapped_column(String(50), nullable=False)
     latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    details_json: Mapped[dict | None] = mapped_column("details", JSON, nullable=True)
+    score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     checked_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     server: Mapped[Server] = relationship(back_populates="checks")
