@@ -112,3 +112,20 @@ def test_scan_server_fails_when_phase_a_success_but_phase_b_has_no_successes(mon
         assert check.error_message == "phase_b_has_no_successful_probes"
     finally:
         session.close()
+
+
+def test_xray_public_api_compatibility() -> None:
+    from inspect import signature
+
+    from app.checks.xray_adapter import XrayAdapter
+    from app.services.xray_pool import XrayPoolService
+
+    adapter_sig = signature(XrayAdapter.__init__)
+    pool_sig = signature(XrayPoolService.__init__)
+
+    assert "max_workers" in adapter_sig.parameters
+    assert "max_workers" in pool_sig.parameters
+
+    adapter = XrayAdapter(max_workers=10)
+    assert adapter.max_workers == 2
+    assert not hasattr(adapter, "pool")
