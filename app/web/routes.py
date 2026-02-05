@@ -38,6 +38,11 @@ def _scan_state_from_job(job: Job | None) -> dict[str, object]:
     running = bool(job and job.status == "running")
     started_at = job.started_at.isoformat() if running and job and job.started_at else None
     progress = 1 if running else 100
+    if running and job and isinstance(job.result, dict):
+        processed = job.result.get("processed")
+        total_servers = job.result.get("total_servers")
+        if isinstance(processed, int) and isinstance(total_servers, int):
+            progress = int(processed / max(total_servers, 1) * 100)
 
     return {
         "running": running,

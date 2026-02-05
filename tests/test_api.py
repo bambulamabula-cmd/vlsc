@@ -258,6 +258,59 @@ def test_scan_start_accepts_valid_modes_with_expected_attempts(mode: str, expect
     _wait_for_job_status(job_id, {"completed", "failed"})
 
 
+def test_scan_page_progress_uses_running_job_result(monkeypatch) -> None:
+    def _slow_scan_server(self, db, server, attempts=5):
+        time.sleep(0.12)
+        check = Check(server_id=server.id, status="ok", score=70)
+        db.add(check)
+        db.commit()
+        db.refresh(check)
+        return check
+
+    monkeypatch.setattr("app.services.scan_runner.ScannerService.scan_server", _slow_scan_server)
+
+    with TestClient(app) as client:
+        payload = "\n".join([
+            _make_uri("progress-a.example.com", 443),
+            _make_uri("progress-b.example.com", 8443),
+            _make_uri("progress-c.example.com", 2053),
+        ])
+        imported = client.post("/api/import", data={"uris_text": payload})
+        assert imported.status_code == 200
+
+        started = client.post("/api/scan/start", data={"mode": "quick"})
+        assert started.status_code == 200
+        job_id = started.json()["job_id"]
+
+        deadline = time.time() + 2.0
+        observed_processed = None
+        while time.time() < deadline:
+            session = SessionLocal()
+            try:
+                job = session.query(Job).filter(Job.id == job_id).first()
+                if job and job.status == "running" and isinstance(job.result, dict):
+                    processed = job.result.get("processed")
+                    total_servers = job.result.get("total_servers")
+                    if isinstance(processed, int) and isinstance(total_servers, int) and processed >= 1:
+                        observed_processed = processed
+                        break
+            finally:
+                session.close()
+            time.sleep(0.03)
+
+        assert observed_processed is not None
+
+        page = client.get("/scan")
+        assert page.status_code == 200
+        expected_progress = int(observed_processed / 3 * 100)
+        assert f'Progress: <span id="progressText">{expected_progress}%</span>' in page.text
+        assert 'Progress: <span id="progressText">1%</span>' not in page.text
+
+        client.post("/api/scan/stop")
+
+    _wait_for_job_status(job_id, {"stopped", "completed", "failed"})
+
+
 def test_scan_start_rejects_invalid_mode() -> None:
     with TestClient(app) as client:
         started = client.post("/api/scan/start", data={"mode": "invalid_mode"})

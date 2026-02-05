@@ -57,8 +57,16 @@ class ScanRunnerService:
                 return
 
             servers = db.query(Server).filter(Server.enabled.is_(True)).order_by(Server.id.asc()).all()
+            total_servers = len(servers)
             processed = 0
             checks: list[dict[str, object]] = []
+            base_result = job.result if isinstance(job.result, dict) else {}
+            job.result = {
+                **base_result,
+                "processed": processed,
+                "total_servers": total_servers,
+            }
+            db.commit()
 
             for server in servers:
                 db.refresh(job)
@@ -66,9 +74,11 @@ class ScanRunnerService:
                     if job.status == "running":
                         job.status = "stopped"
                         job.finished_at = datetime.now(timezone.utc)
+                        existing_result = job.result if isinstance(job.result, dict) else {}
                         job.result = {
+                            **existing_result,
                             "processed": processed,
-                            "total_servers": len(servers),
+                            "total_servers": total_servers,
                             "checks": checks,
                             "cancelled": True,
                         }
@@ -78,14 +88,24 @@ class ScanRunnerService:
                 check = scanner.scan_server(db, server, attempts=attempts)
                 processed += 1
                 checks.append({"server_id": server.id, "check_id": check.id, "status": check.status})
+                existing_result = job.result if isinstance(job.result, dict) else {}
+                job.result = {
+                    **existing_result,
+                    "processed": processed,
+                    "total_servers": total_servers,
+                    "last_server_id": server.id,
+                }
+                db.commit()
 
             db.refresh(job)
             if job.status == "running":
                 job.status = "completed"
                 job.finished_at = datetime.now(timezone.utc)
+                existing_result = job.result if isinstance(job.result, dict) else {}
                 job.result = {
+                    **existing_result,
                     "processed": processed,
-                    "total_servers": len(servers),
+                    "total_servers": total_servers,
                     "checks": checks,
                     "cancelled": False,
                 }
