@@ -95,7 +95,7 @@ class XrayAdapter:
                                     {
                                         "id": vless_config["id"],
                                         "encryption": "none",
-                                        "flow": vless_config["flow"],
+                                        **({"flow": vless_config["flow"]} if vless_config.get("flow") else {}),
                                     }
                                 ],
                             }
@@ -159,8 +159,8 @@ class XrayAdapter:
             "host": vless_config.get("host"),
             "port": vless_config.get("port"),
             "id": vless_config.get("id") or vless_config.get("uuid") or vless_config.get("user_id"),
-            "security": query.get("security") or vless_config.get("security"),
-            "network": query.get("type") or vless_config.get("network") or vless_config.get("type"),
+            "security": query.get("security") or vless_config.get("security") or "none",
+            "network": query.get("type") or vless_config.get("network") or vless_config.get("type") or "tcp",
             "sni": query.get("sni") or query.get("serverName") or vless_config.get("sni") or vless_config.get("serverName"),
             "fp": query.get("fp") or vless_config.get("fp"),
             "flow": query.get("flow") or vless_config.get("flow"),
@@ -169,11 +169,12 @@ class XrayAdapter:
             "grpc_service_name": query.get("serviceName") or vless_config.get("serviceName"),
         }
 
-        missing = [
-            key
-            for key in ("host", "port", "id", "security", "network", "sni", "fp", "flow")
-            if not normalized.get(key)
-        ]
+        missing = [key for key in ("host", "port", "id") if not normalized.get(key)]
+
+        if normalized.get("security") != "none":
+            for key in ("sni", "fp"):
+                if not normalized.get(key):
+                    missing.append(key)
 
         if normalized.get("network") == "ws" and not normalized.get("ws_path"):
             missing.append("path")
