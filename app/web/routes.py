@@ -9,9 +9,9 @@ from typing import Literal
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.config import settings
 from app.db import get_db_session
@@ -299,28 +299,56 @@ def list_servers(
     top: int | None = Query(default=None, ge=1, le=1000),
     sort: str = Query(default="updated_desc"),
 ):
-    servers = db.query(Server).order_by(Server.updated_at.desc()).all()
-    latest_checks = _latest_checks_map(db, [server.id for server in servers])
-    items = [_serialize_server(server, latest_checks.get(server.id)) for server in servers]
+    ranked_checks = (
+        db.query(
+            Check.id.label("check_id"),
+            Check.server_id.label("server_id"),
+            func.row_number()
+            .over(
+                partition_by=Check.server_id,
+                order_by=(Check.checked_at.desc(), Check.id.desc()),
+            )
+            .label("rank"),
+        )
+        .subquery()
+    )
+    latest_check = aliased(Check)
 
-    if alive is not None:
-        items = [item for item in items if item["alive"] is alive]
-    if xray is not None:
-        items = [item for item in items if item["xray_ok"] is xray]
+    query = (
+        db.query(Server, latest_check)
+        .outerjoin(
+            ranked_checks,
+            (ranked_checks.c.server_id == Server.id) & (ranked_checks.c.rank == 1),
+        )
+        .outerjoin(latest_check, latest_check.id == ranked_checks.c.check_id)
+    )
+
+    if alive is True:
+        query = query.filter(latest_check.status == "ok")
+    elif alive is False:
+        query = query.filter(or_(latest_check.id.is_(None), latest_check.status != "ok"))
+
+    xray_ok_expr = func.json_extract(latest_check.details_json, "$.phase_c.success")
+    if xray is True:
+        query = query.filter(xray_ok_expr == 1)
+    elif xray is False:
+        query = query.filter(xray_ok_expr == 0)
+
+    filtered_total = query.order_by(None).count()
 
     if sort == "score_desc":
-        items.sort(key=lambda x: ((x["score"] is None), -(x["score"] or 0)))
+        query = query.order_by(latest_check.score.is_(None).asc(), latest_check.score.desc())
     elif sort == "score_asc":
-        items.sort(key=lambda x: (x["score"] is None, (x["score"] or 0)))
+        query = query.order_by(latest_check.score.is_(None).asc(), latest_check.score.asc())
     elif sort == "name_asc":
-        items.sort(key=lambda x: str(x["name"]).lower())
+        query = query.order_by(func.lower(Server.name).asc())
     else:
-        items.sort(key=lambda x: str(x["updated_at"]), reverse=True)
-
-    filtered_total = len(items)
+        query = query.order_by(Server.updated_at.desc())
 
     if top is not None:
-        items = items[:top]
+        query = query.limit(top)
+
+    items = [_serialize_server(server, check) for server, check in query.all()]
 
     return {"items": items, "total": filtered_total}
 
