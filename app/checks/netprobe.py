@@ -82,14 +82,14 @@ def tcp_probe(host: str, port: int, timeout_s: float) -> TcpAttempt:
             pass
         rtt_ms = (time.perf_counter() - started) * 1000
         return TcpAttempt(success=True, rtt_ms=rtt_ms, error_type=None)
-    except BaseException as exc:
+    except (OSError, socket.gaierror, socket.timeout, TimeoutError, ConnectionRefusedError) as exc:
         return TcpAttempt(success=False, rtt_ms=None, error_type=classify_error(exc))
 
 
 def phase_a_dns_tcp(host: str, port: int, timeout_s: float) -> PhaseAResult:
     try:
         dns_entries = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-    except BaseException as exc:
+    except (OSError, socket.gaierror, socket.timeout, TimeoutError, ConnectionRefusedError) as exc:
         return PhaseAResult(
             success=False,
             dns_ok=False,

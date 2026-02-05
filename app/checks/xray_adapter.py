@@ -101,7 +101,7 @@ class XrayAdapter:
                     pass
                 latency_ms = (time.perf_counter() - started) * 1000
                 return PhaseCResult(enabled=True, available=True, success=True, latency_ms=latency_ms, error_message=None)
-            except BaseException as exc:
+            except Exception as exc:
                 return PhaseCResult(
                     enabled=True,
                     available=True,
