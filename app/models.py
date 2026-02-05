@@ -54,6 +54,7 @@ class ServerAlias(Base):
 
 class Check(Base):
     __tablename__ = "checks"
+    __table_args__ = (Index("ix_checks_server_checked_at", "server_id", "checked_at"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"), nullable=False)

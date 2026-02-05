@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -44,17 +45,28 @@ def _latest_checks_map(db: Session, server_ids: list[int]) -> dict[int, Check]:
     if not server_ids:
         return {}
 
+    ranked_checks = (
+        db.query(
+            Check.id.label("check_id"),
+            Check.server_id.label("server_id"),
+            func.row_number()
+            .over(
+                partition_by=Check.server_id,
+                order_by=(Check.checked_at.desc(), Check.id.desc()),
+            )
+            .label("rank"),
+        )
+        .filter(Check.server_id.in_(server_ids))
+        .subquery()
+    )
+
     checks = (
         db.query(Check)
-        .filter(Check.server_id.in_(server_ids))
-        .order_by(Check.server_id.asc(), Check.checked_at.desc())
+        .join(ranked_checks, ranked_checks.c.check_id == Check.id)
+        .filter(ranked_checks.c.rank == 1)
         .all()
     )
-    latest: dict[int, Check] = {}
-    for check in checks:
-        if check.server_id not in latest:
-            latest[check.server_id] = check
-    return latest
+    return {check.server_id: check for check in checks}
 
 
 def _serialize_server(server: Server, last_check: Check | None = None) -> dict[str, object]:
