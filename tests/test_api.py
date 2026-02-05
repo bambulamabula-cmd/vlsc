@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from io import BytesIO
 from uuid import uuid4
 
@@ -152,3 +153,36 @@ def test_scan_stop_uses_db_state_after_client_recreation() -> None:
         assert duplicate_stop.status_code == 200
         assert duplicate_stop.json()["stopped_job_id"] is None
         assert duplicate_stop.json()["scan_state"]["running"] is False
+
+
+def test_servers_listing_uses_latest_check_per_server() -> None:
+    with TestClient(app) as client:
+        import_payload = "\n".join([
+            _make_uri("latest-a.example.com", 443),
+            _make_uri("latest-b.example.com", 8443),
+        ])
+        imported = client.post("/api/import", data={"uris_text": import_payload})
+        assert imported.status_code == 200
+
+    session = SessionLocal()
+    try:
+        server_a = session.query(Server).filter(Server.host == "latest-a.example.com").one()
+        server_b = session.query(Server).filter(Server.host == "latest-b.example.com").one()
+
+        session.add_all([
+            Check(server_id=server_a.id, status="ok", score=20, checked_at=datetime(2024, 1, 1, 10, 0, 0)),
+            Check(server_id=server_a.id, status="fail", score=99, checked_at=datetime(2024, 1, 1, 11, 0, 0)),
+            Check(server_id=server_b.id, status="ok", score=55, checked_at=datetime(2024, 1, 1, 9, 0, 0)),
+        ])
+        session.commit()
+    finally:
+        session.close()
+
+    with TestClient(app) as client:
+        response = client.get("/api/servers")
+        assert response.status_code == 200
+
+        by_host = {item["host"]: item for item in response.json()["items"]}
+        assert by_host["latest-a.example.com"]["score"] == 99
+        assert by_host["latest-a.example.com"]["alive"] is False
+        assert by_host["latest-b.example.com"]["score"] == 55
