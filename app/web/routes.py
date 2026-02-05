@@ -275,10 +275,12 @@ def list_servers(
     else:
         items.sort(key=lambda x: str(x["updated_at"]), reverse=True)
 
+    filtered_total = len(items)
+
     if top is not None:
         items = items[:top]
 
-    return {"items": items, "total": len(items)}
+    return {"items": items, "total": filtered_total}
 
 
 @router.get("/api/servers/{server_id}")

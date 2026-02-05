@@ -48,7 +48,8 @@ def test_import_and_servers_listing() -> None:
         servers = client.get("/api/servers?sort=name_asc&top=1")
         assert servers.status_code == 200
         body = servers.json()
-        assert body["total"] == 1
+        assert body["total"] == 2
+        assert len(body["items"]) == 1
         assert body["items"][0]["host"] in {"alpha.example.com", "beta.example.com"}
 
 
