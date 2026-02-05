@@ -6,7 +6,6 @@ import socket
 import subprocess
 import tempfile
 import time
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from urllib import request
@@ -24,7 +23,8 @@ class PhaseCResult:
 class XrayAdapter:
     def __init__(self, max_workers: int = 2) -> None:
         self.xray_path = shutil.which("xray")
-        self.pool = ThreadPoolExecutor(max_workers=max(1, min(max_workers, 2)), thread_name_prefix="xray-check")
+        # Keep `max_workers` in signature for backwards compatibility of public API.
+        self.max_workers = max(1, min(max_workers, 2))
 
     @property
     def available(self) -> bool:

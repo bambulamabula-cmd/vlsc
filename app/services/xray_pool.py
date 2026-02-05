@@ -4,7 +4,11 @@ from app.checks.xray_adapter import PhaseCResult, XrayAdapter
 
 
 class XrayPoolService:
-    """Thin wrapper around Xray adapter with constrained worker pool."""
+    """Thin wrapper around Xray adapter with stable service-level API.
+
+    Note: checks are executed synchronously in the caller thread.
+    `max_workers` is preserved for backward compatibility.
+    """
 
     def __init__(self, max_workers: int = 2) -> None:
         self.adapter = XrayAdapter(max_workers=max_workers)
