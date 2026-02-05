@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
@@ -17,7 +18,8 @@ from app.services.retention import RetentionService
 from app.vless.parser import VlessParseError, parse_vless_uri
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/web/templates")
+_TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
 def _scan_state_from_job(job: Job | None) -> dict[str, object]:
     mode = "quick"

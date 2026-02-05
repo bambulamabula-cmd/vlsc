@@ -1,5 +1,9 @@
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+
+from app.main import app
+
 
 REQUIRED_DIRS = [
     "app",
@@ -31,3 +35,14 @@ def test_required_directories_exist() -> None:
 def test_required_files_exist() -> None:
     for file_path in REQUIRED_FILES:
         assert Path(file_path).is_file(), f"Missing file: {file_path}"
+
+
+def test_templates_and_static_resolve_from_any_cwd(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    with TestClient(app) as client:
+        dashboard = client.get("/")
+        scan = client.get("/scan")
+
+    assert dashboard.status_code == 200
+    assert scan.status_code == 200

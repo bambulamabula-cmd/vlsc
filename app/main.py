@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -17,7 +18,8 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="VLSC API", lifespan=lifespan)
 app.include_router(web_router)
-app.mount("/static", StaticFiles(directory="app/web/static"), name="static")
+_STATIC_DIR = Path(__file__).resolve().parent / "web" / "static"
+app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 
 @app.get("/health")
