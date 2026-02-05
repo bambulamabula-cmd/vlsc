@@ -12,11 +12,13 @@
 
 ## Стек
 
-- Python 3.10+
+- Python 3.11+
 - FastAPI + Uvicorn
 - SQLAlchemy 2.x
 - Pydantic Settings
 - Jinja2 (шаблоны)
+
+> ⚠️ Начиная с текущей версии поддержка Python 3.10 прекращена (breaking change для окружений на 3.10).
 
 ## Структура проекта
 
