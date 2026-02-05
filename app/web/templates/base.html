@@ -1,19 +1,37 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="h-full" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ title }}</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = { darkMode: 'class' };
+      const savedTheme = localStorage.getItem('theme');
+      if (savedTheme === 'light') document.documentElement.classList.remove('dark');
+      else document.documentElement.classList.add('dark');
+    </script>
   </head>
-  <body>
-    <header class="app-header">
-      <h1>VLSC</h1>
-      <nav>
-        <a href="/">Dashboard</a>
-        <a href="/scan">Scan</a>
-      </nav>
+  <body class="min-h-full bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <header class="sticky top-0 z-10 border-b border-slate-200/70 bg-white/90 backdrop-blur dark:border-slate-800 dark:bg-slate-900/80">
+      <div class="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+        <div class="flex items-center gap-3">
+          <a href="/" class="text-lg font-bold tracking-tight">VLSC</a>
+          <nav class="flex gap-3 text-sm">
+            <a href="/" class="hover:text-blue-500">Dashboard</a>
+            <a href="/scan" class="hover:text-blue-500">Scan</a>
+          </nav>
+        </div>
+        <button id="themeToggle" class="rounded-full border border-slate-300 px-3 py-1 text-sm dark:border-slate-700">🌓</button>
+      </div>
     </header>
-    <main class="content">{% block content %}{% endblock %}</main>
+    <main class="mx-auto grid max-w-6xl gap-4 px-4 py-4">{% block content %}{% endblock %}</main>
+
+    <script>
+      document.getElementById('themeToggle')?.addEventListener('click', () => {
+        document.documentElement.classList.toggle('dark');
+        localStorage.setItem('theme', document.documentElement.classList.contains('dark') ? 'dark' : 'light');
+      });
+    </script>
   </body>
 </html>
