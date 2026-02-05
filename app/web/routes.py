@@ -13,11 +13,12 @@ from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
-from app.config import settings
+from app.config import Settings, settings
 from app.db import get_db_session
 from app.models import Check, Job, Server
 from app.services.retention import RetentionService
 from app.services.scan_runner import scan_runner_service
+from app.services.settings_store import SettingsStoreError, settings_view_model, upsert_settings
 from app.vless.parser import VlessParseError, parse_vless_uri
 
 router = APIRouter()
@@ -162,6 +163,21 @@ def scan_page(request: Request, db: Session = Depends(get_db_session)):
     )
 
 
+
+
+@router.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request):
+    return templates.TemplateResponse(
+        "settings.html",
+        {
+            "request": request,
+            "title": "Settings",
+            "settings_fields": settings_view_model(),
+            "saved": request.query_params.get("saved") == "1",
+            "error": request.query_params.get("error"),
+        },
+    )
+
 @router.get("/servers/{server_id}", response_class=HTMLResponse)
 def server_details(request: Request, server_id: int, db: Session = Depends(get_db_session)):
     server = db.query(Server).filter(Server.id == server_id).first()
@@ -243,6 +259,33 @@ async def import_uris(
         "errors": errors,
     }
 
+
+
+
+@router.post("/api/settings")
+async def update_settings(request: Request, db: Session = Depends(get_db_session)):
+    form = await request.form()
+    updates: dict[str, object] = {}
+
+    for name in Settings.model_fields:
+        if name not in form:
+            continue
+        raw_value = str(form.get(name, ""))
+        field = Settings.model_fields[name]
+        annotation = field.annotation
+        if annotation is bool:
+            updates[name] = raw_value.lower() in {"1", "true", "on", "yes"}
+        elif annotation is int:
+            updates[name] = int(raw_value)
+        else:
+            updates[name] = raw_value
+
+    try:
+        upsert_settings(db, updates)
+    except (ValueError, SettingsStoreError) as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid settings: {exc}") from exc
+
+    return {"ok": True, "settings": settings_view_model()}
 
 @router.post("/api/scan/start")
 def start_scan(

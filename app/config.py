@@ -1,3 +1,5 @@
+from collections.abc import Mapping
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -25,3 +27,14 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def settings_defaults() -> dict[str, object]:
+    return {name: field.default for name, field in Settings.model_fields.items()}
+
+
+def apply_runtime_settings_overrides(overrides: Mapping[str, object]) -> None:
+    for name, raw_value in overrides.items():
+        if name not in Settings.model_fields:
+            continue
+        setattr(settings, name, raw_value)

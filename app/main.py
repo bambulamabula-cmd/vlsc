@@ -10,6 +10,8 @@ from app.utils.logging import configure_logging
 from app.utils.preflight import log_preflight_warnings
 from app.web.routes import router as web_router
 from app.config import settings
+from app.services.settings_store import apply_persisted_settings
+from app.db import SessionLocal
 
 
 @asynccontextmanager
@@ -17,6 +19,8 @@ async def lifespan(_: FastAPI):
     configure_logging()
     log_preflight_warnings()
     init_db()
+    with SessionLocal() as db:
+        apply_persisted_settings(db)
     yield
 
 

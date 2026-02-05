@@ -7,10 +7,10 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import settings
+from app.config import settings, settings_defaults
 from app.db import SessionLocal
 from app.main import app
-from app.models import Check, DailyAggregate, Job, Server, ServerAlias
+from app.models import AppSetting, Check, DailyAggregate, Job, Server, ServerAlias
 
 
 @pytest.fixture(autouse=True)
@@ -22,7 +22,10 @@ def clean_db() -> None:
         session.query(ServerAlias).delete()
         session.query(Server).delete()
         session.query(Job).delete()
+        session.query(AppSetting).delete()
         session.commit()
+        for key, value in settings_defaults().items():
+            setattr(settings, key, value)
     finally:
         session.close()
 
@@ -46,6 +49,51 @@ def _wait_for_job_status(job_id: int, expected: set[str], timeout_s: float = 3.0
         time.sleep(0.05)
     raise AssertionError(f"Job {job_id} did not reach one of {expected} in {timeout_s}s")
 
+
+
+
+def test_settings_page_and_api_update() -> None:
+    with TestClient(app) as client:
+        page = client.get("/settings")
+        assert page.status_code == 200
+        assert "check_timeout_seconds" in page.text
+
+        response = client.post(
+            "/api/settings",
+            data={
+                "app_name": "VLSC UI",
+                "debug": "true",
+                "check_timeout_seconds": "15",
+                "request_timeout_seconds": "45",
+                "concurrency_limit": "33",
+                "import_file_max_bytes": "2048",
+                "sqlite_path": "./.pytest-vlsc.db",
+                "retention_days": "90",
+                "xray_enabled": "true",
+            },
+        )
+        assert response.status_code == 200
+
+    assert settings.app_name == "VLSC UI"
+    assert settings.debug is True
+    assert settings.check_timeout_seconds == 15
+    assert settings.request_timeout_seconds == 45
+    assert settings.concurrency_limit == 33
+    assert settings.import_file_max_bytes == 2048
+    assert settings.retention_days == 90
+    assert settings.xray_enabled is True
+
+
+def test_settings_api_rejects_invalid_values() -> None:
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/settings",
+            data={
+                "check_timeout_seconds": "0",
+            },
+        )
+
+    assert response.status_code == 422
 
 def test_import_and_servers_listing() -> None:
     with TestClient(app) as client:
@@ -286,6 +334,9 @@ def test_scan_start_stop_and_job_details(monkeypatch) -> None:
 def test_scan_start_accepts_valid_modes_with_expected_attempts(
     mode: str, expected_attempts: int, expected_strategy: str
 ) -> None:
+    if mode == "xray_only":
+        settings.xray_enabled = True
+
     with TestClient(app) as client:
         started = client.post("/api/scan/start", data={"mode": mode})
         assert started.status_code == 200
