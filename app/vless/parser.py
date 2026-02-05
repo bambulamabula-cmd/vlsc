@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 from uuid import UUID
 
@@ -125,9 +124,3 @@ def parse_vless_uri(uri: str) -> VlessUri:
     except ValidationError as exc:
         raise VlessParseError(str(exc)) from exc
 
-
-def normalize_vless_uri(uri: str) -> dict[str, Any]:
-    """Return normalized dict payload convenient for persistence layers."""
-
-    parsed = parse_vless_uri(uri)
-    return parsed.model_dump(mode="json")
