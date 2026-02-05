@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import settings
 from app.db import SessionLocal
 from app.main import app
 from app.models import Check, DailyAggregate, Job, Server, ServerAlias
@@ -356,6 +357,17 @@ def test_scan_page_progress_uses_running_job_result(monkeypatch) -> None:
 
     _wait_for_job_status(job_id, {"stopped", "completed", "failed"})
 
+
+
+
+def test_scan_start_rejects_xray_only_when_xray_disabled(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "xray_enabled", False)
+
+    with TestClient(app) as client:
+        started = client.post("/api/scan/start", data={"mode": "xray_only"})
+
+    assert started.status_code == 400
+    assert started.json()["detail"] == "Xray scan is disabled; set VLSC_XRAY_ENABLED=true"
 
 def test_scan_start_rejects_invalid_mode() -> None:
     with TestClient(app) as client:

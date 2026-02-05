@@ -10,4 +10,7 @@ def test_health_check() -> None:
     client = TestClient(app)
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["xray"]["enabled"] in {True, False}
+    assert payload["xray"]["binary_found"] in {True, False}
