@@ -56,6 +56,9 @@ class ScanRunnerService:
             if not job or job.status != "running":
                 return
 
+            payload = job.payload if isinstance(job.payload, dict) else {}
+            scan_strategy = str(payload.get("scan_strategy") or "full_scan")
+
             servers = db.query(Server).filter(Server.enabled.is_(True)).order_by(Server.id.asc()).all()
             total_servers = len(servers)
             processed = 0
@@ -85,7 +88,7 @@ class ScanRunnerService:
                         db.commit()
                     return
 
-                check = scanner.scan_server(db, server, attempts=attempts)
+                check = scanner.scan_server(db, server, attempts=attempts, scan_strategy=scan_strategy)
                 processed += 1
                 checks.append({"server_id": server.id, "check_id": check.id, "status": check.status})
                 existing_result = job.result if isinstance(job.result, dict) else {}

@@ -229,3 +229,79 @@ def test_xray_public_api_compatibility() -> None:
     adapter = XrayAdapter(max_workers=10)
     assert adapter.max_workers == 2
     assert not hasattr(adapter, "pool")
+
+
+def test_scan_server_xray_only_skips_phase_a_and_b(monkeypatch) -> None:
+    session = SessionLocal()
+    try:
+        server = Server(name="srv", host="xray-only.example.com", port=443)
+        session.add(server)
+        session.commit()
+        session.refresh(server)
+
+        def _phase_a_should_not_run(host, port, timeout_s):
+            raise AssertionError("phase_a_dns_tcp should not be called in xray_only mode")
+
+        def _phase_b_should_not_run(host, port, timeout_s, attempts):
+            raise AssertionError("phase_b_multi_tcp should not be called in xray_only mode")
+
+        monkeypatch.setattr(scanner_module, "phase_a_dns_tcp", _phase_a_should_not_run)
+        monkeypatch.setattr(scanner_module, "phase_b_multi_tcp", _phase_b_should_not_run)
+
+        service = ScannerService()
+        monkeypatch.setattr(
+            service.xray_pool,
+            "check_http_via_xray",
+            lambda host, port, enabled, timeout_s: PhaseCResult(
+                enabled=True,
+                available=True,
+                success=True,
+                latency_ms=123.0,
+                error_message=None,
+            ),
+        )
+
+        check = service.scan_server(session, server, attempts=3, scan_strategy="xray_only")
+
+        assert check.status == "ok"
+        assert check.score == 100
+        assert check.error_message is None
+        assert isinstance(check.details_json, dict)
+        assert check.details_json["scan_strategy"] == "xray_only"
+        assert check.details_json["phase_a"]["skipped"] is True
+        assert check.details_json["phase_b"]["skipped"] is True
+    finally:
+        session.close()
+
+
+def test_scan_server_xray_only_uses_phase_c_result_for_status_and_error(monkeypatch) -> None:
+    session = SessionLocal()
+    try:
+        server = Server(name="srv", host="xray-fail.example.com", port=8443)
+        session.add(server)
+        session.commit()
+        session.refresh(server)
+
+        monkeypatch.setattr(scanner_module, "phase_a_dns_tcp", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("phase_a should not run")))
+        monkeypatch.setattr(scanner_module, "phase_b_multi_tcp", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("phase_b should not run")))
+
+        service = ScannerService()
+        monkeypatch.setattr(
+            service.xray_pool,
+            "check_http_via_xray",
+            lambda host, port, enabled, timeout_s: PhaseCResult(
+                enabled=True,
+                available=True,
+                success=False,
+                latency_ms=None,
+                error_message="xray downstream timeout",
+            ),
+        )
+
+        check = service.scan_server(session, server, attempts=3, scan_strategy="xray_only")
+
+        assert check.status == "fail"
+        assert check.score == 0
+        assert check.error_message == "xray downstream timeout"
+    finally:
+        session.close()

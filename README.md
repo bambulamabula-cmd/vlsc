@@ -96,7 +96,7 @@ export VLSC_XRAY_ENABLED=true
 - `POST /api/import` — импорт URI (`uris_text` и/или `uris_file`).
 - `GET /api/servers` — список серверов (`alive`, `xray`, `top`, `sort`).
 - `GET /api/servers/{server_id}` — сервер + история проверок.
-- `POST /api/scan/start` — запуск сканирования (`mode`).
+- `POST /api/scan/start` — запуск сканирования (`mode`: `quick`/`full` запускают фазы A+B+C, `xray_only` запускает только фазу C).
 - `POST /api/scan/stop` — остановка активного сканирования.
 - `GET /api/jobs/{job_id}` — статус задачи.
 - `GET /api/export` — экспорт серверов в CSV.

@@ -29,6 +29,11 @@ SCAN_MODE_ATTEMPTS: dict[ScanMode, int] = {
     "full": 8,
     "xray_only": 3,
 }
+SCAN_MODE_STRATEGY: dict[ScanMode, str] = {
+    "quick": "full_scan",
+    "full": "full_scan",
+    "xray_only": "xray_only",
+}
 
 def _scan_state_from_job(job: Job | None) -> dict[str, object]:
     mode = "quick"
@@ -233,10 +238,22 @@ async def import_uris(
 
 
 @router.post("/api/scan/start")
-def start_scan(mode: ScanMode = Form(default="quick"), db: Session = Depends(get_db_session)):
+def start_scan(
+    mode: ScanMode = Form(
+        default="quick",
+        description="Scan mode: quick/full run phases A+B+C, xray_only runs phase C only.",
+    ),
+    db: Session = Depends(get_db_session),
+):
     now = datetime.now(timezone.utc)
     attempts = SCAN_MODE_ATTEMPTS[mode]
-    job = Job(kind="scan", status="running", payload={"mode": mode, "attempts": attempts}, started_at=now)
+    scan_strategy = SCAN_MODE_STRATEGY[mode]
+    job = Job(
+        kind="scan",
+        status="running",
+        payload={"mode": mode, "attempts": attempts, "scan_strategy": scan_strategy},
+        started_at=now,
+    )
 
     try:
         with db.begin():
