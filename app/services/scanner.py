@@ -153,21 +153,24 @@ class ScannerService:
                 day=day,
                 checks_total=1,
                 success_total=1 if check.status == "ok" else 0,
+                latency_samples_total=1 if check.latency_ms is not None else 0,
                 avg_latency_ms=check.latency_ms,
             )
             db.add(aggregate)
         else:
-            previous_checks_total = aggregate.checks_total
             aggregate.checks_total += 1
             aggregate.success_total += 1 if check.status == "ok" else 0
 
             if check.latency_ms is not None:
-                if aggregate.avg_latency_ms is None or previous_checks_total == 0:
+                previous_samples_total = aggregate.latency_samples_total
+                aggregate.latency_samples_total += 1
+
+                if aggregate.avg_latency_ms is None or previous_samples_total == 0:
                     aggregate.avg_latency_ms = check.latency_ms
                 else:
                     aggregate.avg_latency_ms = aggregate.avg_latency_ms + (
                         check.latency_ms - aggregate.avg_latency_ms
-                    ) / (previous_checks_total + 1)
+                    ) / aggregate.latency_samples_total
 
     def recompute_daily_aggregate(self, db: Session, server_id: int, day: date) -> DailyAggregate:
         """Recovery-only full recomputation of daily aggregate from checks table."""
@@ -181,7 +184,8 @@ class ScannerService:
         checks_total = len(checks)
         success_total = len([c for c in checks if c.status == "ok"])
         latencies = [c.latency_ms for c in checks if c.latency_ms is not None]
-        avg_latency = (sum(latencies) / len(latencies)) if latencies else None
+        latency_samples_total = len(latencies)
+        avg_latency = (sum(latencies) / latency_samples_total) if latencies else None
 
         if aggregate is None:
             aggregate = DailyAggregate(
@@ -189,12 +193,14 @@ class ScannerService:
                 day=day,
                 checks_total=checks_total,
                 success_total=success_total,
+                latency_samples_total=latency_samples_total,
                 avg_latency_ms=avg_latency,
             )
             db.add(aggregate)
         else:
             aggregate.checks_total = checks_total
             aggregate.success_total = success_total
+            aggregate.latency_samples_total = latency_samples_total
             aggregate.avg_latency_ms = avg_latency
 
         return aggregate

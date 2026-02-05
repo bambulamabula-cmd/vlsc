@@ -35,6 +35,7 @@ def test_update_daily_aggregate_uses_incremental_online_average() -> None:
             day=day.date(),
             checks_total=2,
             success_total=1,
+            latency_samples_total=2,
             avg_latency_ms=100.0,
         )
         session.add(aggregate)
@@ -52,7 +53,60 @@ def test_update_daily_aggregate_uses_incremental_online_average() -> None:
 
         assert aggregate.checks_total == 3
         assert aggregate.success_total == 2
+        assert aggregate.latency_samples_total == 3
         assert aggregate.avg_latency_ms == 90.0
+    finally:
+        session.rollback()
+        session.close()
+
+
+def test_daily_aggregate_ignores_none_latency_and_matches_recompute() -> None:
+    session = SessionLocal()
+    try:
+        server = Server(name="srv", host="none-latency.example.com", port=443)
+        session.add(server)
+        session.commit()
+        session.refresh(server)
+
+        service = ScannerService()
+        check_data = [
+            ("ok", None),
+            ("fail", 120.0),
+            ("ok", None),
+            ("ok", 60.0),
+            ("fail", None),
+            ("ok", 90.0),
+        ]
+        day = datetime(2024, 2, 2, 8, 0, 0)
+
+        for idx, (status, latency) in enumerate(check_data):
+            check = Check(
+                server_id=server.id,
+                status=status,
+                latency_ms=latency,
+                checked_at=day.replace(hour=8 + idx),
+            )
+            session.add(check)
+            session.flush()
+            service._update_daily_aggregate(session, check)
+
+        aggregate = (
+            session.query(DailyAggregate)
+            .filter(DailyAggregate.server_id == server.id, DailyAggregate.day == day.date())
+            .one()
+        )
+
+        assert aggregate.checks_total == 6
+        assert aggregate.success_total == 4
+        assert aggregate.latency_samples_total == 3
+        assert aggregate.avg_latency_ms == 90.0
+
+        recomputed = service.recompute_daily_aggregate(session, server.id, day.date())
+
+        assert recomputed.checks_total == aggregate.checks_total
+        assert recomputed.success_total == aggregate.success_total
+        assert recomputed.latency_samples_total == aggregate.latency_samples_total
+        assert recomputed.avg_latency_ms == aggregate.avg_latency_ms
     finally:
         session.rollback()
         session.close()

@@ -130,6 +130,7 @@ class DailyAggregate(Base):
     day: Mapped[date] = mapped_column(Date, nullable=False)
     checks_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     success_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    latency_samples_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     avg_latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     server: Mapped[Server] = relationship(back_populates="daily_aggregates")
