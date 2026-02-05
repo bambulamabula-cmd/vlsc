@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from uuid import uuid4
 
@@ -113,3 +114,41 @@ def test_export_endpoint_returns_csv() -> None:
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/csv")
         assert "id,name,host,port,enabled,updated_at" in response.text
+
+
+def test_scan_start_is_atomic_under_concurrency() -> None:
+    with TestClient(app) as client:
+        def _start() -> int:
+            return client.post("/api/scan/start", data={"mode": "quick"}).status_code
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            statuses = list(pool.map(lambda _: _start(), range(2)))
+
+        assert sorted(statuses) == [200, 409]
+
+        session = SessionLocal()
+        try:
+            running_jobs = session.query(Job).filter(Job.kind == "scan", Job.status == "running").all()
+            assert len(running_jobs) == 1
+        finally:
+            session.close()
+
+
+def test_scan_stop_uses_db_state_after_client_recreation() -> None:
+    with TestClient(app) as client:
+        started = client.post("/api/scan/start", data={"mode": "full"})
+        assert started.status_code == 200
+        job_id = started.json()["job_id"]
+
+    with TestClient(app) as new_client:
+        stop = new_client.post("/api/scan/stop")
+        assert stop.status_code == 200
+        payload = stop.json()
+        assert payload["stopped_job_id"] == job_id
+        assert payload["scan_state"]["running"] is False
+        assert payload["scan_state"]["job_id"] is None
+
+        duplicate_stop = new_client.post("/api/scan/stop")
+        assert duplicate_stop.status_code == 200
+        assert duplicate_stop.json()["stopped_job_id"] is None
+        assert duplicate_stop.json()["scan_state"]["running"] is False
