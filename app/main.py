@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
+import shutil
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -26,5 +27,11 @@ app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 
 @app.get("/health")
-def health_check() -> dict[str, str]:
-    return {"status": "ok"}
+def health_check() -> dict[str, object]:
+    return {
+        "status": "ok",
+        "xray": {
+            "enabled": settings.xray_enabled,
+            "binary_found": shutil.which("xray") is not None,
+        },
+    }

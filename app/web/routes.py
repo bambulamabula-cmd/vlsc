@@ -157,6 +157,7 @@ def scan_page(request: Request, db: Session = Depends(get_db_session)):
             "title": "Scan Servers",
             "scan_state": _scan_state_from_job(_active_scan_job(db)),
             "last_job": last_job,
+            "xray_enabled": settings.xray_enabled,
         },
     )
 
@@ -251,6 +252,12 @@ def start_scan(
     ),
     db: Session = Depends(get_db_session),
 ):
+    if mode == "xray_only" and not settings.xray_enabled:
+        raise HTTPException(
+            status_code=400,
+            detail="Xray scan is disabled; set VLSC_XRAY_ENABLED=true",
+        )
+
     now = datetime.now(timezone.utc)
     attempts = SCAN_MODE_ATTEMPTS[mode]
     scan_strategy = SCAN_MODE_STRATEGY[mode]

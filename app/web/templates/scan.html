@@ -7,7 +7,7 @@
     <select id="mode" class="rounded border border-slate-300 bg-transparent px-2 py-1 dark:border-slate-700">
       <option value="quick">Quick</option>
       <option value="full">Full</option>
-      <option value="xray_only">Xray only (phase C)</option>
+      <option value="xray_only" {% if not xray_enabled %}disabled{% endif %}>Xray only (phase C){% if not xray_enabled %} — disabled{% endif %}</option>
     </select>
     <button id="startScan" class="rounded bg-blue-600 px-3 py-1 text-white">Start</button>
     <button id="stopScan" class="rounded bg-rose-600 px-3 py-1 text-white">Stop</button>
@@ -17,7 +17,7 @@
     <div class="h-2 overflow-hidden rounded bg-slate-200 dark:bg-slate-800"><div id="progressBar" class="h-full bg-blue-500" style="width: {{ scan_state.progress }}%"></div></div>
   </div>
   <pre id="scanState" class="mt-3 rounded bg-slate-100 p-2 text-xs dark:bg-slate-950">{{ scan_state }}</pre>
-  <p id="scanMessage" class="mt-2 text-sm text-slate-500"></p>
+  <p id="scanMessage" class="mt-2 text-sm text-slate-500">{% if not xray_enabled %}Xray-only mode is unavailable: set VLSC_XRAY_ENABLED=true.{% endif %}</p>
 </section>
 
 <section class="rounded-2xl bg-white p-4 shadow-sm dark:bg-slate-900">
