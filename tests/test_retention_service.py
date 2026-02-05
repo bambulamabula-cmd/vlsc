@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from types import SimpleNamespace
 
 from sqlalchemy import text
@@ -11,8 +12,10 @@ from app.services.retention import RetentionService
 class _Query:
     def __init__(self, deleted_count: int):
         self.deleted_count = deleted_count
+        self.filters: list[object] = []
 
-    def filter(self, *_args, **_kwargs):
+    def filter(self, *args, **_kwargs):
+        self.filters.extend(args)
         return self
 
     def delete(self, synchronize_session=False):
@@ -26,10 +29,12 @@ class _SessionStub:
         self._deleted_checks = deleted_checks
         self._deleted_aggregates = deleted_aggregates
         self.commit_calls = 0
+        self.check_query: _Query | None = None
 
     def query(self, model):
         if model is Check:
-            return _Query(self._deleted_checks)
+            self.check_query = _Query(self._deleted_checks)
+            return self.check_query
         if model is DailyAggregate:
             return _Query(self._deleted_aggregates)
         raise AssertionError(f"unexpected model: {model}")
@@ -85,3 +90,20 @@ def test_cleanup_skips_vacuum_for_non_sqlite() -> None:
 
     assert session.commit_calls == 1
     assert report["vacuum"] is False
+
+
+def test_cleanup_uses_naive_utc_cutoff_for_checks_filter() -> None:
+    class _Bind:
+        dialect = SimpleNamespace(name="postgresql")
+
+    session = _SessionStub(bind=_Bind())
+    RetentionService().cleanup(session, raw_checks_days=7, run_vacuum=False)
+
+    assert session.check_query is not None
+    assert session.check_query.filters
+
+    cutoff_expr = session.check_query.filters[0]
+    cutoff_value = cutoff_expr.right.value
+
+    assert isinstance(cutoff_value, datetime)
+    assert cutoff_value.tzinfo is None

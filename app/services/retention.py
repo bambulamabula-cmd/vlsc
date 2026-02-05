@@ -5,7 +5,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.models import Check, DailyAggregate
+from app.models import Check, DailyAggregate, normalize_utc_naive
 
 
 class RetentionService:
@@ -23,6 +23,7 @@ class RetentionService:
 
         now = datetime.now(timezone.utc)
         checks_cutoff = now - timedelta(days=raw_checks_days)
+        checks_cutoff = normalize_utc_naive(checks_cutoff)
         aggregate_cutoff = now.date() - timedelta(days=aggregate_days)
 
         deleted_checks = (
