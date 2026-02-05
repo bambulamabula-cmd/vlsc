@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     check_timeout_seconds: int = Field(default=10, ge=1, le=300)
     request_timeout_seconds: int = Field(default=20, ge=1, le=600)
     concurrency_limit: int = Field(default=20, ge=1, le=500)
+    import_file_max_bytes: int = Field(default=1024 * 1024, ge=1)
 
     # Database and retention
     sqlite_path: str = "./vlsc.db"

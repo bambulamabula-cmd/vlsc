@@ -13,6 +13,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db import get_db_session
 from app.models import Check, Job, Server
 from app.services.retention import RetentionService
@@ -204,6 +205,11 @@ async def import_uris(
         if not filename.endswith(".txt"):
             raise HTTPException(status_code=400, detail="Only .txt files are supported")
         payload = await uris_file.read()
+        if len(payload) > settings.import_file_max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Import file is too large (max {settings.import_file_max_bytes} bytes)",
+            )
         chunks.append(payload.decode("utf-8", errors="replace"))
 
     if not chunks:

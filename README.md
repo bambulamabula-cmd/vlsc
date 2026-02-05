@@ -93,7 +93,7 @@ export VLSC_XRAY_ENABLED=true
 - `GET /` — dashboard.
 - `GET /scan` — страница запуска/контроля сканирования.
 - `GET /servers/{id}` — страница деталей сервера.
-- `POST /api/import` — импорт URI (`uris_text` и/или `uris_file`).
+- `POST /api/import` — импорт URI (`uris_text` и/или `uris_file`, `.txt` до 1 MiB).
 - `GET /api/servers` — список серверов (`alive`, `xray`, `top`, `sort`).
 - `GET /api/servers/{server_id}` — сервер + история проверок.
 - `POST /api/scan/start` — запуск сканирования (`mode`: `quick`/`full` запускают фазы A+B+C, `xray_only` запускает только фазу C).
