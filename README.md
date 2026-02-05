@@ -1,8 +1,24 @@
 # VLSC
 
-Минимальный каркас FastAPI-приложения для мобильного (mobile-first) мониторинга серверов.
+Минимальный FastAPI-сервис для mobile-first мониторинга серверов с веб-интерфейсом, импортом VLESS URI, сканированием и хранением истории проверок в SQLite.
 
-## Структура
+## Возможности
+
+- Веб-дашборд: список серверов, состояние сканирования и карточка сервера.
+- Импорт VLESS URI (текстом или `.txt` файлом).
+- API для списка серверов, деталей, jobs и экспорта CSV.
+- Управление сканированием (`start/stop`) и отчистка истории (`retention cleanup`).
+- Локальное хранение данных через SQLite + SQLAlchemy.
+
+## Стек
+
+- Python 3.10+
+- FastAPI + Uvicorn
+- SQLAlchemy 2.x
+- Pydantic Settings
+- Jinja2 (шаблоны)
+
+## Структура проекта
 
 ```text
 app/
@@ -10,10 +26,10 @@ app/
   config.py
   db.py
   models.py
-  vless/
   checks/
   services/
   utils/
+  vless/
   web/
     routes.py
     templates/
@@ -21,63 +37,86 @@ app/
 tests/
 ```
 
-## Быстрый запуск в Termux (Android)
+## Быстрый старт
 
-1. Установите Termux (F-Droid версия предпочтительнее).
-2. Установите зависимости системы:
-   ```bash
-   pkg update && pkg upgrade -y
-   pkg install -y python git clang libffi openssl
-   ```
-3. Клонируйте проект и создайте виртуальное окружение:
-   ```bash
-   git clone <repo-url> vlsc
-   cd vlsc
-   python -m venv .venv
-   source .venv/bin/activate
-   ```
-4. Установите Python-зависимости из манифеста проекта:
-   ```bash
-   pip install --upgrade pip
-   pip install -e .
-   pip install -e ".[dev]"
-   ```
-   > Если нужны только runtime-зависимости, достаточно `pip install -e .`.
-5. Запустите приложение:
-   ```bash
-   uvicorn app.main:app --host 0.0.0.0 --port 8000
-   ```
-6. Откройте в браузере Android: `http://127.0.0.1:8000`.
+```bash
+git clone <repo-url> vlsc
+cd vlsc
+python -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -e .
+```
 
-## Ограничения Android/Termux
+Для разработки:
 
-- Фоновые процессы могут «замораживаться» системой, особенно при выключенном экране.
-- Aggressive Doze/App Standby могут ограничивать сетевую активность и таймеры.
-- SQLite на медленных накопителях может быть узким местом при высоком `concurrency`.
-- Долгие фоновые задачи нестабильны без внешнего watchdog/пере-запуска.
+```bash
+pip install -e ".[dev]"
+```
 
-## Рекомендации по энергосбережению
+Запуск:
 
-- Добавьте Termux в исключения оптимизации батареи (`Battery optimization -> Don't optimize`).
-- Используйте `termux-wake-lock` перед длительным запуском и `termux-wake-unlock` после.
-- Поддерживайте низкий `concurrency_limit` и разумные таймауты в `app/config.py`.
-- Для регулярного старта задач используйте Termux:Boot + безопасные интервалы.
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
 
-## Модель выполнения проверок
+Проверка:
 
-- Проверки `phase_a`, `phase_b` и `phase_c` (через Xray) выполняются синхронно в потоке запроса.
-- `XrayAdapter` и `XrayPoolService` сохраняют параметр `max_workers` в публичном API для обратной совместимости, но внутренний thread pool не используется.
+- UI: `http://127.0.0.1:8000/`
+- Health: `http://127.0.0.1:8000/health`
+
+## Настройки (ENV)
+
+Конфигурация читается из переменных с префиксом `VLSC_` (см. `app/config.py`):
+
+- `VLSC_APP_NAME` (default: `VLSC`)
+- `VLSC_DEBUG` (default: `false`)
+- `VLSC_CHECK_TIMEOUT_SECONDS` (default: `10`)
+- `VLSC_REQUEST_TIMEOUT_SECONDS` (default: `20`)
+- `VLSC_CONCURRENCY_LIMIT` (default: `20`)
+- `VLSC_SQLITE_PATH` (default: `./vlsc.db`)
+- `VLSC_RETENTION_DAYS` (default: `30`)
+- `VLSC_XRAY_ENABLED` (default: `false`)
+
+Пример:
+
+```bash
+export VLSC_SQLITE_PATH=./data/vlsc.db
+export VLSC_XRAY_ENABLED=true
+```
 
 ## API (кратко)
 
-- `GET /api/servers` поддерживает фильтры `alive`, `xray`, сортировку `sort` и лимит `top`.
-- В ответе:
-  - `items` — список серверов после фильтрации/сортировки и применения `top`;
-  - `total` — общее число найденных записей после фильтрации/сортировки, **до** применения `top`.
+- `GET /health` — health-check.
+- `GET /` — dashboard.
+- `GET /scan` — страница запуска/контроля сканирования.
+- `GET /servers/{id}` — страница деталей сервера.
+- `POST /api/import` — импорт URI (`uris_text` и/или `uris_file`).
+- `GET /api/servers` — список серверов (`alive`, `xray`, `top`, `sort`).
+- `GET /api/servers/{server_id}` — сервер + история проверок.
+- `POST /api/scan/start` — запуск сканирования (`mode`).
+- `POST /api/scan/stop` — остановка активного сканирования.
+- `GET /api/jobs/{job_id}` — статус задачи.
+- `GET /api/export` — экспорт серверов в CSV.
+- `POST /api/retention/cleanup` — очистка и агрегация истории.
 
-## Проверка работоспособности
+## Termux (Android)
 
-- Health-check: `GET /health`
-- Главная страница: `GET /`
-- Страница сканирования: `GET /scan`
-- Детали сервера: `GET /servers/{id}`
+```bash
+pkg update && pkg upgrade -y
+pkg install -y python git clang libffi openssl
+```
+
+Далее шаги те же, что в «Быстрый старт».
+
+Рекомендации:
+
+- Добавьте Termux в исключения Battery Optimization.
+- Для долгих сессий используйте `termux-wake-lock`.
+- Не завышайте `VLSC_CONCURRENCY_LIMIT` на слабых устройствах.
+
+## Ограничения
+
+- Фоновые процессы в Android/Termux могут быть ограничены системой.
+- SQLite может стать узким местом при высокой параллельности.
+- Долгие фоновые задачи лучше запускать с внешним watchdog/рестартом.
