@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vlsc"
+version = "0.1.0"
+description = "Минимальный каркас FastAPI-приложения для мобильного мониторинга серверов"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.110,<1.0",
+  "uvicorn>=0.29,<1.0",
+  "sqlalchemy>=2.0,<3.0",
+  "pydantic>=2.6,<3.0",
+  "pydantic-settings>=2.2,<3.0",
+  "jinja2>=3.1,<4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0,<9.0",
+  "httpx>=0.27,<1.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["app", "app.*"]
