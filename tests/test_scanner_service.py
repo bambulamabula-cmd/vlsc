@@ -114,6 +114,73 @@ def test_scan_server_fails_when_phase_a_success_but_phase_b_has_no_successes(mon
         session.close()
 
 
+def test_scan_server_with_previous_check_does_not_fail_confidence_datetime_math(monkeypatch) -> None:
+    session = SessionLocal()
+    try:
+        server = Server(name="srv", host="example.com", port=443)
+        session.add(server)
+        session.commit()
+        session.refresh(server)
+
+        previous = Check(
+            server_id=server.id,
+            status="ok",
+            latency_ms=15.0,
+            checked_at=datetime(2024, 1, 1, 9, 0, 0),
+        )
+        session.add(previous)
+        session.commit()
+
+        monkeypatch.setattr(
+            scanner_module,
+            "phase_a_dns_tcp",
+            lambda host, port, timeout_s: PhaseAResult(
+                success=True,
+                dns_ok=True,
+                ip="127.0.0.1",
+                rtt_ms=20.0,
+                error_type=None,
+                error_message=None,
+            ),
+        )
+        monkeypatch.setattr(
+            scanner_module,
+            "phase_b_multi_tcp",
+            lambda host, port, timeout_s, attempts: PhaseBResult(
+                attempts=attempts,
+                successes=attempts,
+                success_rate=1.0,
+                rtt_min_ms=18.0,
+                rtt_median_ms=20.0,
+                rtt_max_ms=22.0,
+                jitter_ms=2.0,
+                stopped_early=False,
+                samples=(18.0, 20.0, 22.0),
+            ),
+        )
+
+        service = ScannerService()
+        monkeypatch.setattr(
+            service.xray_pool,
+            "check_http_via_xray",
+            lambda host, port, enabled, timeout_s: PhaseCResult(
+                enabled=False,
+                available=False,
+                success=False,
+                latency_ms=None,
+                error_message=None,
+            ),
+        )
+
+        check = service.scan_server(session, server, attempts=3)
+
+        assert check.status == "ok"
+        assert check.confidence is not None
+        assert 0.0 <= check.confidence <= 1.0
+    finally:
+        session.close()
+
+
 def test_xray_public_api_compatibility() -> None:
     from inspect import signature
 
