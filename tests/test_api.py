@@ -111,6 +111,66 @@ def test_import_is_atomic_under_duplicate_concurrency() -> None:
         session.close()
 
 
+def test_import_large_payload_counts_duplicates_correctly() -> None:
+    unique_items = [_make_uri(f"bulk-{idx}.example.com", 443) for idx in range(300)]
+    duplicated_items = unique_items[:120]
+    text = "\n".join(unique_items + duplicated_items)
+
+    with TestClient(app) as client:
+        response = client.post("/api/import", data={"uris_text": text})
+        assert response.status_code == 200
+        payload = response.json()
+
+    assert payload["accepted"] == len(unique_items) + len(duplicated_items)
+    assert payload["created"] == len(unique_items)
+    assert payload["skipped_duplicates"] == len(duplicated_items)
+
+    session = SessionLocal()
+    try:
+        assert session.query(Server).count() == len(unique_items)
+    finally:
+        session.close()
+
+
+def test_import_is_atomic_under_high_concurrency() -> None:
+    shared_payload = "\n".join([
+        _make_uri("concurrent-a.example.com", 443),
+        _make_uri("concurrent-b.example.com", 8443),
+        _make_uri("concurrent-c.example.com", 2053),
+    ])
+
+    def _import_once() -> dict[str, int]:
+        with TestClient(app) as client:
+            response = client.post("/api/import", data={"uris_text": shared_payload})
+            assert response.status_code == 200
+            payload = response.json()
+            return {
+                "created": payload["created"],
+                "skipped_duplicates": payload["skipped_duplicates"],
+            }
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(lambda _: _import_once(), range(6)))
+
+    created_total = sum(item["created"] for item in results)
+    skipped_total = sum(item["skipped_duplicates"] for item in results)
+
+    assert created_total == 3
+    assert skipped_total == (6 * 3) - 3
+
+    session = SessionLocal()
+    try:
+        rows = session.query(Server).filter(Server.host.like("concurrent-%.example.com")).all()
+        assert len(rows) == 3
+        assert {(row.host, row.port) for row in rows} == {
+            ("concurrent-a.example.com", 443),
+            ("concurrent-b.example.com", 8443),
+            ("concurrent-c.example.com", 2053),
+        }
+    finally:
+        session.close()
+
+
 def test_import_rejects_non_txt_file() -> None:
     with TestClient(app) as client:
         response = client.post(
