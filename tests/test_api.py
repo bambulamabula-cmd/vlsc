@@ -198,6 +198,17 @@ def test_import_rejects_non_txt_file() -> None:
         assert response.status_code == 400
 
 
+def test_import_rejects_oversized_txt_file() -> None:
+    with TestClient(app) as client:
+        oversized_payload = b"a" * (1024 * 1024 + 1)
+        response = client.post(
+            "/api/import",
+            files={"uris_file": ("uris.txt", BytesIO(oversized_payload), "text/plain")},
+        )
+        assert response.status_code == 413
+        assert response.json()["detail"] == "Import file is too large (max 1048576 bytes)"
+
+
 def test_scan_start_stop_and_job_details(monkeypatch) -> None:
     def _slow_scan_server(self, db, server, attempts=5, scan_strategy="full_scan"):
         assert scan_strategy in {"full_scan", "xray_only"}
