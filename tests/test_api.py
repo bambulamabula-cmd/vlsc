@@ -199,7 +199,8 @@ def test_import_rejects_non_txt_file() -> None:
 
 
 def test_scan_start_stop_and_job_details(monkeypatch) -> None:
-    def _slow_scan_server(self, db, server, attempts=5):
+    def _slow_scan_server(self, db, server, attempts=5, scan_strategy="full_scan"):
+        assert scan_strategy in {"full_scan", "xray_only"}
         time.sleep(0.2)
         check = Check(server_id=server.id, status="ok", score=42)
         db.add(check)
@@ -233,14 +234,16 @@ def test_scan_start_stop_and_job_details(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize(
-    ("mode", "expected_attempts"),
+    ("mode", "expected_attempts", "expected_strategy"),
     [
-        ("quick", 5),
-        ("full", 8),
-        ("xray_only", 3),
+        ("quick", 5, "full_scan"),
+        ("full", 8, "full_scan"),
+        ("xray_only", 3, "xray_only"),
     ],
 )
-def test_scan_start_accepts_valid_modes_with_expected_attempts(mode: str, expected_attempts: int) -> None:
+def test_scan_start_accepts_valid_modes_with_expected_attempts(
+    mode: str, expected_attempts: int, expected_strategy: str
+) -> None:
     with TestClient(app) as client:
         started = client.post("/api/scan/start", data={"mode": mode})
         assert started.status_code == 200
@@ -252,6 +255,7 @@ def test_scan_start_accepts_valid_modes_with_expected_attempts(mode: str, expect
         assert isinstance(job.payload, dict)
         assert job.payload["mode"] == mode
         assert job.payload["attempts"] == expected_attempts
+        assert job.payload["scan_strategy"] == expected_strategy
     finally:
         session.close()
 
@@ -259,7 +263,8 @@ def test_scan_start_accepts_valid_modes_with_expected_attempts(mode: str, expect
 
 
 def test_scan_page_progress_uses_running_job_result(monkeypatch) -> None:
-    def _slow_scan_server(self, db, server, attempts=5):
+    def _slow_scan_server(self, db, server, attempts=5, scan_strategy="full_scan"):
+        assert scan_strategy in {"full_scan", "xray_only"}
         time.sleep(0.12)
         check = Check(server_id=server.id, status="ok", score=70)
         db.add(check)
@@ -326,7 +331,8 @@ def test_export_endpoint_returns_csv() -> None:
 
 
 def test_scan_start_is_atomic_under_concurrency(monkeypatch) -> None:
-    def _slow_scan_server(self, db, server, attempts=5):
+    def _slow_scan_server(self, db, server, attempts=5, scan_strategy="full_scan"):
+        assert scan_strategy in {"full_scan", "xray_only"}
         time.sleep(0.2)
         check = Check(server_id=server.id, status="ok", score=64)
         db.add(check)
@@ -416,7 +422,8 @@ def test_servers_listing_uses_latest_check_per_server() -> None:
 
 
 def test_scan_runner_creates_checks_and_completes(monkeypatch) -> None:
-    def _fake_scan_server(self, db, server, attempts=5):
+    def _fake_scan_server(self, db, server, attempts=5, scan_strategy="full_scan"):
+        assert scan_strategy in {"full_scan", "xray_only"}
         check = Check(server_id=server.id, status="ok", score=77, latency_ms=12.0)
         db.add(check)
         db.commit()
@@ -456,7 +463,8 @@ def test_scan_runner_creates_checks_and_completes(monkeypatch) -> None:
 
 
 def test_scan_runner_sets_failed_status_on_exception(monkeypatch) -> None:
-    def _broken_scan_server(self, db, server, attempts=5):
+    def _broken_scan_server(self, db, server, attempts=5, scan_strategy="full_scan"):
+        assert scan_strategy in {"full_scan", "xray_only"}
         raise RuntimeError("scan exploded")
 
     monkeypatch.setattr("app.services.scan_runner.ScannerService.scan_server", _broken_scan_server)
@@ -484,7 +492,8 @@ def test_scan_runner_sets_failed_status_on_exception(monkeypatch) -> None:
 def test_scan_stop_interrupts_further_servers(monkeypatch) -> None:
     processed_hosts: list[str] = []
 
-    def _slow_scan_server(self, db, server, attempts=5):
+    def _slow_scan_server(self, db, server, attempts=5, scan_strategy="full_scan"):
+        assert scan_strategy in {"full_scan", "xray_only"}
         processed_hosts.append(server.host)
         time.sleep(0.2)
         check = Check(server_id=server.id, status="ok", score=50)
