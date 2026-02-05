@@ -33,6 +33,10 @@ class Server(Base):
 
     aliases: Mapped[list["ServerAlias"]] = relationship(back_populates="server", cascade="all, delete-orphan")
     checks: Mapped[list["Check"]] = relationship(back_populates="server", cascade="all, delete-orphan")
+    daily_aggregates: Mapped[list["DailyAggregate"]] = relationship(
+        back_populates="server",
+        cascade="all, delete-orphan",
+    )
 
 
 class ServerAlias(Base):
@@ -82,3 +86,5 @@ class DailyAggregate(Base):
     checks_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     success_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     avg_latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    server: Mapped[Server] = relationship(back_populates="daily_aggregates")

@@ -1,15 +1,19 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.db import Base, engine
+from app.db import init_db
 from app.web.routes import router as web_router
 
-app = FastAPI(title="VLSC API")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    init_db()
+    yield
 
 
-@app.on_event("startup")
-def init_database() -> None:
-    Base.metadata.create_all(bind=engine)
+app = FastAPI(title="VLSC API", lifespan=lifespan)
 app.include_router(web_router)
 app.mount("/static", StaticFiles(directory="app/web/static"), name="static")
 

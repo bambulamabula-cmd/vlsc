@@ -1,5 +1,7 @@
+from collections.abc import Generator
+
 from sqlalchemy import create_engine
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import settings
 
@@ -19,7 +21,14 @@ engine = create_engine(
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
 
-def get_db_session():
+def init_db() -> None:
+    """Create database tables for all registered models."""
+    from app import models  # noqa: F401
+
+    Base.metadata.create_all(bind=engine)
+
+
+def get_db_session() -> Generator[Session, None, None]:
     """FastAPI dependency that yields a DB session."""
     session = SessionLocal()
     try:
