@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 @dataclass(frozen=True)
@@ -20,7 +20,25 @@ class ConfidenceResult:
     components: dict[str, float]
 
 
+def _to_utc_naive(value: datetime | None) -> datetime | None:
+    if value is None or value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _normalize_confidence_datetimes(metrics: ConfidenceInput) -> ConfidenceInput:
+    return ConfidenceInput(
+        success_count=metrics.success_count,
+        total_count=metrics.total_count,
+        jitter_ms=metrics.jitter_ms,
+        last_checked_at=_to_utc_naive(metrics.last_checked_at),
+        now=_to_utc_naive(metrics.now) or datetime.now(timezone.utc).replace(tzinfo=None),
+    )
+
+
 def calculate_confidence(metrics: ConfidenceInput, half_life_hours: float = 24.0) -> ConfidenceResult:
+    metrics = _normalize_confidence_datetimes(metrics)
+
     if metrics.total_count <= 0:
         return ConfidenceResult(confidence=0.0, components={"volume": 0.0, "stability": 0.0, "recency": 0.0})
 

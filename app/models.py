@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from sqlalchemy import (
     JSON,
@@ -14,9 +14,21 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.db import Base
+
+
+def utcnow_naive() -> datetime:
+    """Return current UTC time as timezone-naive datetime."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def normalize_utc_naive(value: datetime | None) -> datetime | None:
+    """Normalize datetime to timezone-naive UTC for DB storage and math."""
+    if value is None or value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 class Server(Base):
@@ -29,9 +41,9 @@ class Server(Base):
     port: Mapped[int] = mapped_column(Integer, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     metadata_json: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime, default=utcnow_naive, onupdate=utcnow_naive, nullable=False
     )
 
     aliases: Mapped[list["ServerAlias"]] = relationship(back_populates="server", cascade="all, delete-orphan")
@@ -40,6 +52,13 @@ class Server(Base):
         back_populates="server",
         cascade="all, delete-orphan",
     )
+
+    @validates("created_at", "updated_at")
+    def _normalize_datetimes(self, _key: str, value: datetime) -> datetime:
+        normalized = normalize_utc_naive(value)
+        if normalized is None:
+            raise ValueError("created_at/updated_at cannot be None")
+        return normalized
 
 
 class ServerAlias(Base):
@@ -65,9 +84,16 @@ class Check(Base):
     details_json: Mapped[dict | None] = mapped_column("details", JSON, nullable=True)
     score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
-    checked_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    checked_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, nullable=False)
 
     server: Mapped[Server] = relationship(back_populates="checks")
+
+    @validates("checked_at")
+    def _normalize_checked_at(self, _key: str, value: datetime) -> datetime:
+        normalized = normalize_utc_naive(value)
+        if normalized is None:
+            raise ValueError("checked_at cannot be None")
+        return normalized
 
 
 class Job(Base):
@@ -88,7 +114,11 @@ class Job(Base):
     result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, nullable=False)
+
+    @validates("started_at", "finished_at", "created_at")
+    def _normalize_datetimes(self, _key: str, value: datetime | None) -> datetime | None:
+        return normalize_utc_naive(value)
 
 
 class DailyAggregate(Base):

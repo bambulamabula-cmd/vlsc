@@ -10,7 +10,7 @@ from app.checks.confidence import ConfidenceInput, calculate_confidence
 from app.checks.netprobe import phase_a_dns_tcp, phase_b_multi_tcp
 from app.checks.scoring import explainable_score
 from app.config import settings
-from app.models import Check, DailyAggregate, Server
+from app.models import Check, DailyAggregate, Server, normalize_utc_naive
 from app.services.xray_pool import XrayPoolService
 
 
@@ -91,8 +91,8 @@ class ScannerService:
             success_count=previous_success + latest_successes,
             total_count=previous_total + latest_total,
             jitter_ms=jitter_ms,
-            last_checked_at=last_check.checked_at if last_check else None,
-            now=datetime.now(timezone.utc),
+            last_checked_at=normalize_utc_naive(last_check.checked_at) if last_check else None,
+            now=normalize_utc_naive(datetime.now(timezone.utc)),
         )
 
     def _update_daily_aggregate(self, db: Session, check: Check) -> None:
