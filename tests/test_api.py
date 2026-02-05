@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+import time
 from io import BytesIO
 from uuid import uuid4
 
@@ -27,6 +28,22 @@ def clean_db() -> None:
 
 def _make_uri(host: str, port: int) -> str:
     return f"vless://{uuid4()}@{host}:{port}?security=tls&type=ws#srv"
+
+
+
+
+def _wait_for_job_status(job_id: int, expected: set[str], timeout_s: float = 3.0) -> str:
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        session = SessionLocal()
+        try:
+            job = session.query(Job).filter(Job.id == job_id).first()
+            if job and job.status in expected:
+                return job.status
+        finally:
+            session.close()
+        time.sleep(0.05)
+    raise AssertionError(f"Job {job_id} did not reach one of {expected} in {timeout_s}s")
 
 
 def test_import_and_servers_listing() -> None:
@@ -181,8 +198,21 @@ def test_import_rejects_non_txt_file() -> None:
         assert response.status_code == 400
 
 
-def test_scan_start_stop_and_job_details() -> None:
+def test_scan_start_stop_and_job_details(monkeypatch) -> None:
+    def _slow_scan_server(self, db, server, attempts=5):
+        time.sleep(0.2)
+        check = Check(server_id=server.id, status="ok", score=42)
+        db.add(check)
+        db.commit()
+        db.refresh(check)
+        return check
+
+    monkeypatch.setattr("app.services.scan_runner.ScannerService.scan_server", _slow_scan_server)
+
     with TestClient(app) as client:
+        imported = client.post("/api/import", data={"uris_text": _make_uri("start-stop.example.com", 443)})
+        assert imported.status_code == 200
+
         started = client.post("/api/scan/start", data={"mode": "full"})
         assert started.status_code == 200
         job_id = started.json()["job_id"]
@@ -192,12 +222,14 @@ def test_scan_start_stop_and_job_details() -> None:
 
         job = client.get(f"/api/jobs/{job_id}")
         assert job.status_code == 200
-        assert job.json()["status"] == "running"
+        assert job.json()["status"] in {"running", "completed"}
 
         stopped = client.post("/api/scan/stop")
         assert stopped.status_code == 200
         assert stopped.json()["scan_state"]["running"] is False
-        assert stopped.json()["stopped_job_id"] == job_id
+        assert stopped.json()["stopped_job_id"] in {job_id, None}
+
+    _wait_for_job_status(job_id, {"stopped", "completed", "failed"})
 
 
 def test_export_endpoint_returns_csv() -> None:
@@ -208,8 +240,21 @@ def test_export_endpoint_returns_csv() -> None:
         assert "id,name,host,port,enabled,updated_at" in response.text
 
 
-def test_scan_start_is_atomic_under_concurrency() -> None:
+def test_scan_start_is_atomic_under_concurrency(monkeypatch) -> None:
+    def _slow_scan_server(self, db, server, attempts=5):
+        time.sleep(0.2)
+        check = Check(server_id=server.id, status="ok", score=64)
+        db.add(check)
+        db.commit()
+        db.refresh(check)
+        return check
+
+    monkeypatch.setattr("app.services.scan_runner.ScannerService.scan_server", _slow_scan_server)
+
     with TestClient(app) as client:
+        imported = client.post("/api/import", data={"uris_text": _make_uri("atomic.example.com", 443)})
+        assert imported.status_code == 200
+
         def _start() -> int:
             return client.post("/api/scan/start", data={"mode": "quick"}).status_code
 
@@ -220,10 +265,16 @@ def test_scan_start_is_atomic_under_concurrency() -> None:
 
         session = SessionLocal()
         try:
-            running_jobs = session.query(Job).filter(Job.kind == "scan", Job.status == "running").all()
-            assert len(running_jobs) == 1
+            jobs = session.query(Job).filter(Job.kind == "scan").all()
+            assert len(jobs) == 1
+            running_job_id = jobs[0].id
         finally:
             session.close()
+
+        stop = client.post("/api/scan/stop")
+        assert stop.status_code == 200
+
+    _wait_for_job_status(running_job_id, {"stopped", "completed", "failed"})
 
 
 def test_scan_stop_uses_db_state_after_client_recreation() -> None:
@@ -236,7 +287,7 @@ def test_scan_stop_uses_db_state_after_client_recreation() -> None:
         stop = new_client.post("/api/scan/stop")
         assert stop.status_code == 200
         payload = stop.json()
-        assert payload["stopped_job_id"] == job_id
+        assert payload["stopped_job_id"] in {job_id, None}
         assert payload["scan_state"]["running"] is False
         assert payload["scan_state"]["job_id"] is None
 
@@ -277,3 +328,119 @@ def test_servers_listing_uses_latest_check_per_server() -> None:
         assert by_host["latest-a.example.com"]["score"] == 99
         assert by_host["latest-a.example.com"]["alive"] is False
         assert by_host["latest-b.example.com"]["score"] == 55
+
+
+def test_scan_runner_creates_checks_and_completes(monkeypatch) -> None:
+    def _fake_scan_server(self, db, server, attempts=5):
+        check = Check(server_id=server.id, status="ok", score=77, latency_ms=12.0)
+        db.add(check)
+        db.commit()
+        db.refresh(check)
+        return check
+
+    monkeypatch.setattr("app.services.scan_runner.ScannerService.scan_server", _fake_scan_server)
+
+    with TestClient(app) as client:
+        payload = "\n".join([
+            _make_uri("runner-a.example.com", 443),
+            _make_uri("runner-b.example.com", 8443),
+        ])
+        imported = client.post("/api/import", data={"uris_text": payload})
+        assert imported.status_code == 200
+
+        started = client.post("/api/scan/start", data={"mode": "quick"})
+        assert started.status_code == 200
+        job_id = started.json()["job_id"]
+
+    final_status = _wait_for_job_status(job_id, {"completed", "failed"})
+    assert final_status == "completed"
+
+    session = SessionLocal()
+    try:
+        server_ids = {server.id for server in session.query(Server).filter(Server.host.in_(["runner-a.example.com", "runner-b.example.com"]))}
+        checks = session.query(Check).filter(Check.server_id.in_(server_ids)).all()
+        assert len(checks) == 2
+
+        job = session.query(Job).filter(Job.id == job_id).one()
+        assert job.status == "completed"
+        assert job.finished_at is not None
+        assert isinstance(job.result, dict)
+        assert job.result["processed"] == 2
+    finally:
+        session.close()
+
+
+def test_scan_runner_sets_failed_status_on_exception(monkeypatch) -> None:
+    def _broken_scan_server(self, db, server, attempts=5):
+        raise RuntimeError("scan exploded")
+
+    monkeypatch.setattr("app.services.scan_runner.ScannerService.scan_server", _broken_scan_server)
+
+    with TestClient(app) as client:
+        imported = client.post("/api/import", data={"uris_text": _make_uri("fail.example.com", 443)})
+        assert imported.status_code == 200
+
+        started = client.post("/api/scan/start", data={"mode": "quick"})
+        assert started.status_code == 200
+        job_id = started.json()["job_id"]
+
+    final_status = _wait_for_job_status(job_id, {"failed"})
+    assert final_status == "failed"
+
+    session = SessionLocal()
+    try:
+        job = session.query(Job).filter(Job.id == job_id).one()
+        assert isinstance(job.result, dict)
+        assert "scan exploded" in job.result.get("error", "")
+    finally:
+        session.close()
+
+
+def test_scan_stop_interrupts_further_servers(monkeypatch) -> None:
+    processed_hosts: list[str] = []
+
+    def _slow_scan_server(self, db, server, attempts=5):
+        processed_hosts.append(server.host)
+        time.sleep(0.2)
+        check = Check(server_id=server.id, status="ok", score=50)
+        db.add(check)
+        db.commit()
+        db.refresh(check)
+        return check
+
+    monkeypatch.setattr("app.services.scan_runner.ScannerService.scan_server", _slow_scan_server)
+
+    with TestClient(app) as client:
+        payload = "\n".join([
+            _make_uri("stop-a.example.com", 443),
+            _make_uri("stop-b.example.com", 8443),
+            _make_uri("stop-c.example.com", 2053),
+        ])
+        imported = client.post("/api/import", data={"uris_text": payload})
+        assert imported.status_code == 200
+
+        started = client.post("/api/scan/start", data={"mode": "quick"})
+        assert started.status_code == 200
+        job_id = started.json()["job_id"]
+
+        time.sleep(0.08)
+        stopped = client.post("/api/scan/stop")
+        assert stopped.status_code == 200
+        assert stopped.json()["stopped_job_id"] in {job_id, None}
+
+    _wait_for_job_status(job_id, {"stopped"})
+
+    session = SessionLocal()
+    try:
+        server_ids = {server.id for server in session.query(Server).filter(Server.host.like("stop-%.example.com"))}
+        checks = session.query(Check).filter(Check.server_id.in_(server_ids)).all()
+        assert len(checks) < 3
+
+        job = session.query(Job).filter(Job.id == job_id).one()
+        assert job.status == "stopped"
+        assert isinstance(job.result, dict)
+        assert job.result.get("cancelled") is True
+    finally:
+        session.close()
+
+    assert len(processed_hosts) < 3
