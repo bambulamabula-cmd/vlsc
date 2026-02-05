@@ -17,6 +17,7 @@
     <div class="h-2 overflow-hidden rounded bg-slate-200 dark:bg-slate-800"><div id="progressBar" class="h-full bg-blue-500" style="width: {{ scan_state.progress }}%"></div></div>
   </div>
   <pre id="scanState" class="mt-3 rounded bg-slate-100 p-2 text-xs dark:bg-slate-950">{{ scan_state }}</pre>
+  <p id="scanMessage" class="mt-2 text-sm text-slate-500"></p>
 </section>
 
 <section class="rounded-2xl bg-white p-4 shadow-sm dark:bg-slate-900">
@@ -31,6 +32,7 @@
 
 <script>
   const scanState = document.getElementById('scanState');
+  const scanMessage = document.getElementById('scanMessage');
   const progressBar = document.getElementById('progressBar');
   const progressText = document.getElementById('progressText');
 
@@ -45,12 +47,20 @@
     const mode = document.getElementById('mode').value;
     const body = new URLSearchParams({ mode });
     const response = await fetch('/api/scan/start', { method: 'POST', body });
-    renderState(await response.json());
+    const payload = await response.json();
+    if (!response.ok) {
+      scanMessage.textContent = payload.detail || 'Unable to start scan';
+      return;
+    }
+    scanMessage.textContent = `Scan started (job #${payload.job_id})`;
+    renderState(payload);
   });
 
   document.getElementById('stopScan')?.addEventListener('click', async () => {
     const response = await fetch('/api/scan/stop', { method: 'POST' });
-    renderState(await response.json());
+    const payload = await response.json();
+    scanMessage.textContent = payload.stopped_job_id ? `Stopped job #${payload.stopped_job_id}` : 'No running scan job';
+    renderState(payload);
   });
 </script>
 {% endblock %}

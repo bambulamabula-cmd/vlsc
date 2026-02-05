@@ -22,15 +22,33 @@ SCAN_STATE: dict[str, object] = {
     "mode": "quick",
     "started_at": None,
     "progress": 0,
+    "job_id": None,
 }
 
 
-def _serialize_server(server: Server) -> dict[str, object]:
-    last_check = server.checks[-1] if server.checks else None
+def _latest_checks_map(db: Session, server_ids: list[int]) -> dict[int, Check]:
+    if not server_ids:
+        return {}
+
+    checks = (
+        db.query(Check)
+        .filter(Check.server_id.in_(server_ids))
+        .order_by(Check.server_id.asc(), Check.checked_at.desc())
+        .all()
+    )
+    latest: dict[int, Check] = {}
+    for check in checks:
+        if check.server_id not in latest:
+            latest[check.server_id] = check
+    return latest
+
+
+def _serialize_server(server: Server, last_check: Check | None = None) -> dict[str, object]:
     xray = None
     if last_check and last_check.details_json:
         phase_c = last_check.details_json.get("phase_c", {})
         xray = phase_c.get("success")
+
     return {
         "id": server.id,
         "name": server.name,
@@ -58,13 +76,15 @@ def _parse_import_payload(raw_text: str) -> tuple[list[dict[str, object]], list[
             parsed.append(parsed_uri.model_dump(mode="json"))
         except VlessParseError as exc:
             errors.append({"line": line_number, "uri": candidate, "error": str(exc)})
+
     return parsed, errors
 
 
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, db: Session = Depends(get_db_session)):
     servers = db.query(Server).order_by(Server.updated_at.desc()).all()
-    items = [_serialize_server(server) for server in servers]
+    latest_checks = _latest_checks_map(db, [server.id for server in servers])
+    items = [_serialize_server(server, latest_checks.get(server.id)) for server in servers]
 
     return templates.TemplateResponse(
         "dashboard.html",
@@ -107,8 +127,8 @@ def server_details(request: Request, server_id: int, db: Session = Depends(get_d
         .all()
     )
     latest = history[0] if history else None
-
     sparkline = [int(check.score or 0) for check in reversed(history)]
+
     return templates.TemplateResponse(
         "server_details.html",
         {
@@ -128,25 +148,35 @@ async def import_uris(
     uris_text: str = Form(default=""),
     uris_file: UploadFile | None = File(default=None),
 ):
-    chunks = [uris_text]
+    chunks: list[str] = []
+    if uris_text.strip():
+        chunks.append(uris_text)
+
     if uris_file is not None:
-        if not uris_file.filename.lower().endswith(".txt"):
+        filename = (uris_file.filename or "").lower()
+        if not filename.endswith(".txt"):
             raise HTTPException(status_code=400, detail="Only .txt files are supported")
         payload = await uris_file.read()
         chunks.append(payload.decode("utf-8", errors="replace"))
 
+    if not chunks:
+        raise HTTPException(status_code=400, detail="No URIs provided")
+
     parsed, errors = _parse_import_payload("\n".join(chunks))
 
     created = 0
+    skipped_duplicates = 0
     for item in parsed:
         host = item["host"]
         port = item["port"]
         name = item.get("name") or f"{host}:{port}"
+
         existing = db.query(Server).filter(Server.host == host, Server.port == port).first()
         if existing:
+            skipped_duplicates += 1
             continue
-        server = Server(name=name, host=host, port=port, metadata_json=item)
-        db.add(server)
+
+        db.add(Server(name=name, host=host, port=port, metadata_json=item))
         created += 1
 
     db.commit()
@@ -154,32 +184,44 @@ async def import_uris(
     return {
         "accepted": len(parsed),
         "created": created,
+        "skipped_duplicates": skipped_duplicates,
         "errors": errors,
     }
 
 
 @router.post("/api/scan/start")
-def start_scan(
-    mode: str = Form(default="quick"),
-    db: Session = Depends(get_db_session),
-):
-    SCAN_STATE.update({"running": True, "mode": mode, "started_at": datetime.now(timezone.utc).isoformat(), "progress": 1})
-    job = Job(kind="scan", status="running", payload={"mode": mode}, started_at=datetime.utcnow())
+def start_scan(mode: str = Form(default="quick"), db: Session = Depends(get_db_session)):
+    if SCAN_STATE["running"] is True:
+        raise HTTPException(status_code=409, detail="Scan already running")
+
+    now = datetime.now(timezone.utc)
+    job = Job(kind="scan", status="running", payload={"mode": mode}, started_at=now)
     db.add(job)
     db.commit()
     db.refresh(job)
+
+    SCAN_STATE.update(
+        {
+            "running": True,
+            "mode": mode,
+            "started_at": now.isoformat(),
+            "progress": 1,
+            "job_id": job.id,
+        }
+    )
     return {"job_id": job.id, "scan_state": SCAN_STATE}
 
 
 @router.post("/api/scan/stop")
 def stop_scan(db: Session = Depends(get_db_session)):
-    SCAN_STATE.update({"running": False, "progress": 100})
-    job = db.query(Job).filter(Job.kind == "scan", Job.status == "running").order_by(Job.id.desc()).first()
-    if job:
-        job.status = "stopped"
-        job.finished_at = datetime.utcnow()
+    running_job = db.query(Job).filter(Job.kind == "scan", Job.status == "running").order_by(Job.id.desc()).first()
+    if running_job:
+        running_job.status = "stopped"
+        running_job.finished_at = datetime.now(timezone.utc)
         db.commit()
-    return {"scan_state": SCAN_STATE}
+
+    SCAN_STATE.update({"running": False, "progress": 100})
+    return {"scan_state": SCAN_STATE, "stopped_job_id": running_job.id if running_job else None}
 
 
 @router.get("/api/servers")
@@ -191,7 +233,8 @@ def list_servers(
     sort: str = Query(default="updated_desc"),
 ):
     servers = db.query(Server).order_by(Server.updated_at.desc()).all()
-    items = [_serialize_server(server) for server in servers]
+    latest_checks = _latest_checks_map(db, [server.id for server in servers])
+    items = [_serialize_server(server, latest_checks.get(server.id)) for server in servers]
 
     if alive is not None:
         items = [item for item in items if item["alive"] is alive]
@@ -199,11 +242,13 @@ def list_servers(
         items = [item for item in items if item["xray_ok"] is xray]
 
     if sort == "score_desc":
-        items.sort(key=lambda x: (x["score"] is None, -(x["score"] or 0)))
+        items.sort(key=lambda x: ((x["score"] is None), -(x["score"] or 0)))
     elif sort == "score_asc":
-        items.sort(key=lambda x: (x["score"] is None, x["score"] or 0))
+        items.sort(key=lambda x: (x["score"] is None, (x["score"] or 0)))
     elif sort == "name_asc":
         items.sort(key=lambda x: str(x["name"]).lower())
+    else:
+        items.sort(key=lambda x: str(x["updated_at"]), reverse=True)
 
     if top is not None:
         items = items[:top]
@@ -225,7 +270,7 @@ def get_server(server_id: int, db: Session = Depends(get_db_session)):
         .all()
     )
     return {
-        "server": _serialize_server(server),
+        "server": _serialize_server(server, history[0] if history else None),
         "history": [
             {
                 "id": check.id,
