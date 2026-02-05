@@ -106,10 +106,31 @@ export VLSC_XRAY_ENABLED=true
 
 ```bash
 pkg update && pkg upgrade -y
-pkg install -y python git clang libffi openssl
+pkg install -y python git clang rust pkg-config make libffi openssl
+```
+
+Если в процессе сборки будут ошибки линковки для SQLite/zlib, доустановите:
+
+```bash
+pkg install -y libsqlite zlib
+```
+
+Проверьте готовность окружения перед `pip install -e .`:
+
+```bash
+python -V
+pip -V
+rustc -V
+cargo -V
 ```
 
 Далее шаги те же, что в «Быстрый старт».
+
+### Если установка падает на pydantic-core
+
+На Termux `pydantic-core` обычно собирается локально через Rust toolchain, поэтому важно,
+чтобы `rustc`/`cargo` были установлены и доступны в `PATH`. После установки зависимостей
+повторите `pip install -e .`.
 
 Рекомендации:
 
