@@ -4,6 +4,7 @@ import csv
 import io
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
@@ -21,6 +22,13 @@ from app.vless.parser import VlessParseError, parse_vless_uri
 router = APIRouter()
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+
+ScanMode = Literal["quick", "full", "xray_only"]
+SCAN_MODE_ATTEMPTS: dict[ScanMode, int] = {
+    "quick": 5,
+    "full": 8,
+    "xray_only": 3,
+}
 
 def _scan_state_from_job(job: Job | None) -> dict[str, object]:
     mode = "quick"
@@ -220,9 +228,9 @@ async def import_uris(
 
 
 @router.post("/api/scan/start")
-def start_scan(mode: str = Form(default="quick"), db: Session = Depends(get_db_session)):
+def start_scan(mode: ScanMode = Form(default="quick"), db: Session = Depends(get_db_session)):
     now = datetime.now(timezone.utc)
-    attempts = 5 if mode == "quick" else 8
+    attempts = SCAN_MODE_ATTEMPTS[mode]
     job = Job(kind="scan", status="running", payload={"mode": mode, "attempts": attempts}, started_at=now)
 
     try:

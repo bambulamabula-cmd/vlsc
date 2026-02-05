@@ -232,6 +232,38 @@ def test_scan_start_stop_and_job_details(monkeypatch) -> None:
     _wait_for_job_status(job_id, {"stopped", "completed", "failed"})
 
 
+@pytest.mark.parametrize(
+    ("mode", "expected_attempts"),
+    [
+        ("quick", 5),
+        ("full", 8),
+        ("xray_only", 3),
+    ],
+)
+def test_scan_start_accepts_valid_modes_with_expected_attempts(mode: str, expected_attempts: int) -> None:
+    with TestClient(app) as client:
+        started = client.post("/api/scan/start", data={"mode": mode})
+        assert started.status_code == 200
+        job_id = started.json()["job_id"]
+
+    session = SessionLocal()
+    try:
+        job = session.query(Job).filter(Job.id == job_id).one()
+        assert isinstance(job.payload, dict)
+        assert job.payload["mode"] == mode
+        assert job.payload["attempts"] == expected_attempts
+    finally:
+        session.close()
+
+    _wait_for_job_status(job_id, {"completed", "failed"})
+
+
+def test_scan_start_rejects_invalid_mode() -> None:
+    with TestClient(app) as client:
+        started = client.post("/api/scan/start", data={"mode": "invalid_mode"})
+        assert started.status_code == 422
+
+
 def test_export_endpoint_returns_csv() -> None:
     with TestClient(app) as client:
         response = client.get("/api/export")
