@@ -7,7 +7,7 @@ name = "vlsc"
 version = "0.1.0"
 description = "Минимальный каркас FastAPI-приложения для мобильного мониторинга серверов"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.110,<1.0",
   "uvicorn>=0.29,<1.0",
