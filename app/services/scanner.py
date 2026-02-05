@@ -37,13 +37,18 @@ class ScannerService:
             last_error=phase_a.error_type,
         )
 
-        confidence_input = self._build_confidence_input(db, server.id, phase_b.successes, phase_b.attempts, phase_b.jitter_ms)
-        confidence = calculate_confidence(confidence_input)
-
         # Business rule: check is "ok" only when phase A reaches host and
         # phase B has at least one successful probe.
         phase_b_has_success = phase_b.successes > 0 or phase_b.success_rate > 0.0
         status = "ok" if phase_a.success and phase_b_has_success else "fail"
+
+        confidence_input = self._build_confidence_input(
+            db,
+            server.id,
+            current_check_ok=status == "ok",
+            jitter_ms=phase_b.jitter_ms,
+        )
+        confidence = calculate_confidence(confidence_input)
 
         if status == "ok":
             error_message = None
@@ -79,8 +84,7 @@ class ScannerService:
         self,
         db: Session,
         server_id: int,
-        latest_successes: int,
-        latest_total: int,
+        current_check_ok: bool,
         jitter_ms: float | None,
     ) -> ConfidenceInput:
         previous_success = db.query(func.count(Check.id)).filter(Check.server_id == server_id, Check.status == "ok").scalar() or 0
@@ -88,8 +92,8 @@ class ScannerService:
         last_check = db.query(Check).filter(Check.server_id == server_id).order_by(Check.checked_at.desc()).first()
 
         return ConfidenceInput(
-            success_count=previous_success + latest_successes,
-            total_count=previous_total + latest_total,
+            success_count=previous_success + (1 if current_check_ok else 0),
+            total_count=previous_total + 1,
             jitter_ms=jitter_ms,
             last_checked_at=normalize_utc_naive(last_check.checked_at) if last_check else None,
             now=normalize_utc_naive(datetime.now(timezone.utc)),

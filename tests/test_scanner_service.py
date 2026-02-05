@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from app.db import SessionLocal
+from app.checks.confidence import calculate_confidence
 from app.checks.netprobe import PhaseAResult, PhaseBResult
 from app.checks.xray_adapter import PhaseCResult
 from app.models import Check, DailyAggregate, Job, Server, ServerAlias
@@ -177,6 +178,38 @@ def test_scan_server_with_previous_check_does_not_fail_confidence_datetime_math(
         assert check.status == "ok"
         assert check.confidence is not None
         assert 0.0 <= check.confidence <= 1.0
+    finally:
+        session.close()
+
+
+def test_build_confidence_input_check_granularity_monotonicity() -> None:
+    session = SessionLocal()
+    try:
+        server = Server(name="srv", host="example.com", port=443)
+        session.add(server)
+        session.commit()
+        session.refresh(server)
+
+        service = ScannerService()
+
+        success_confidences: list[float] = []
+        for _ in range(3):
+            metrics = service._build_confidence_input(session, server.id, current_check_ok=True, jitter_ms=None)
+            confidence = calculate_confidence(metrics).confidence
+            success_confidences.append(confidence)
+
+            session.add(Check(server_id=server.id, status="ok", latency_ms=10.0))
+            session.commit()
+
+        assert success_confidences[0] <= success_confidences[1] <= success_confidences[2]
+
+        fail_metrics = service._build_confidence_input(session, server.id, current_check_ok=False, jitter_ms=None)
+        fail_confidence = calculate_confidence(fail_metrics).confidence
+
+        success_metrics = service._build_confidence_input(session, server.id, current_check_ok=True, jitter_ms=None)
+        success_confidence = calculate_confidence(success_metrics).confidence
+
+        assert fail_confidence < success_confidence
     finally:
         session.close()
 
