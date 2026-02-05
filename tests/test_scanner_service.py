@@ -1,7 +1,10 @@
 from datetime import datetime
 
 from app.db import SessionLocal
+from app.checks.netprobe import PhaseAResult, PhaseBResult
+from app.checks.xray_adapter import PhaseCResult
 from app.models import Check, DailyAggregate, Job, Server, ServerAlias
+from app.services import scanner as scanner_module
 from app.services.scanner import ScannerService
 
 
@@ -51,4 +54,61 @@ def test_update_daily_aggregate_uses_incremental_online_average() -> None:
         assert aggregate.avg_latency_ms == 90.0
     finally:
         session.rollback()
+        session.close()
+
+
+def test_scan_server_fails_when_phase_a_success_but_phase_b_has_no_successes(monkeypatch) -> None:
+    session = SessionLocal()
+    try:
+        server = Server(name="srv", host="example.com", port=443)
+        session.add(server)
+        session.commit()
+        session.refresh(server)
+
+        monkeypatch.setattr(
+            scanner_module,
+            "phase_a_dns_tcp",
+            lambda host, port, timeout_s: PhaseAResult(
+                success=True,
+                dns_ok=True,
+                ip="127.0.0.1",
+                rtt_ms=25.0,
+                error_type=None,
+                error_message=None,
+            ),
+        )
+        monkeypatch.setattr(
+            scanner_module,
+            "phase_b_multi_tcp",
+            lambda host, port, timeout_s, attempts: PhaseBResult(
+                attempts=attempts,
+                successes=0,
+                success_rate=0.0,
+                rtt_min_ms=None,
+                rtt_median_ms=None,
+                rtt_max_ms=None,
+                jitter_ms=None,
+                stopped_early=False,
+                samples=tuple(),
+            ),
+        )
+
+        service = ScannerService()
+        monkeypatch.setattr(
+            service.xray_pool,
+            "check_http_via_xray",
+            lambda host, port, enabled, timeout_s: PhaseCResult(
+                enabled=False,
+                available=False,
+                success=False,
+                latency_ms=None,
+                error_message=None,
+            ),
+        )
+
+        check = service.scan_server(session, server, attempts=3)
+
+        assert check.status == "fail"
+        assert check.error_message == "phase_b_has_no_successful_probes"
+    finally:
         session.close()
