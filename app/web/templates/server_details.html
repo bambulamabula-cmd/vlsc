@@ -1,13 +1,32 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="card">
-  <h2>Server #{{ server_id }}</h2>
-  <p>Detail page with latest status and latency history.</p>
+<section class="rounded-2xl bg-white p-4 shadow-sm dark:bg-slate-900">
+  <h2 class="text-lg font-semibold">{{ server.name }} ({{ server.host }}:{{ server.port }})</h2>
+  <p class="mt-1 text-sm text-slate-500">Last error: {{ latest.error_message if latest else 'none' }}</p>
+  <p class="text-sm">Current score: <span class="font-semibold">{{ latest.score if latest else '—' }}</span></p>
+  <p class="text-sm">Score explain: {{ (latest.details_json or {}).get('score_explain') if latest else 'n/a' }}</p>
+  <div class="mt-2 text-xs text-slate-500">Sparkline (score history): {{ sparkline }}</div>
 </section>
-<section class="card">
-  <h3>Recent checks</h3>
-  <ul>
-    <li>No checks yet.</li>
-  </ul>
+
+<section class="rounded-2xl bg-white p-4 shadow-sm dark:bg-slate-900">
+  <h3 class="mb-2 text-lg font-semibold">History</h3>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="text-slate-500"><tr><th>When</th><th>Status</th><th>Latency</th><th>Score</th><th>Error</th></tr></thead>
+      <tbody>
+        {% for check in history %}
+        <tr class="border-t border-slate-200 dark:border-slate-800">
+          <td class="py-2">{{ check.checked_at }}</td>
+          <td>{{ check.status }}</td>
+          <td>{{ check.latency_ms or '—' }}</td>
+          <td>{{ check.score or '—' }}</td>
+          <td>{{ check.error_message or '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="py-3 text-slate-500">No checks yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 {% endblock %}

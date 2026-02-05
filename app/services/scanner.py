@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -81,11 +81,11 @@ class ScannerService:
             total_count=previous_total + latest_total,
             jitter_ms=jitter_ms,
             last_checked_at=last_check.checked_at if last_check else None,
-            now=datetime.now(UTC),
+            now=datetime.now(timezone.utc),
         )
 
     def _update_daily_aggregate(self, db: Session, server_id: int) -> None:
-        today = datetime.now(UTC).date()
+        today = datetime.now(timezone.utc).date()
         aggregate = (
             db.query(DailyAggregate)
             .filter(DailyAggregate.server_id == server_id, DailyAggregate.day == today)
