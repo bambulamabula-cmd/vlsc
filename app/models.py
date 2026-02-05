@@ -21,6 +21,7 @@ from app.db import Base
 
 class Server(Base):
     __tablename__ = "servers"
+    __table_args__ = (UniqueConstraint("host", "port", name="uq_server_host_port"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
