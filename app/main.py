@@ -6,12 +6,14 @@ from fastapi.staticfiles import StaticFiles
 
 from app.db import init_db
 from app.utils.logging import configure_logging
+from app.utils.preflight import log_preflight_warnings
 from app.web.routes import router as web_router
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     configure_logging()
+    log_preflight_warnings()
     init_db()
     yield
 

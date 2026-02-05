@@ -106,10 +106,25 @@ export VLSC_XRAY_ENABLED=true
 
 ```bash
 pkg update && pkg upgrade -y
-pkg install -y python git clang libffi openssl
+pkg install -y python git clang rust pkg-config make libffi openssl
+```
+
+Для Python 3.12 в Termux часть зависимостей (например, `pydantic-core`) может собираться из исходников.
+Поэтому заранее нужен toolchain (`rust`/`cargo`, `clang`, `pkg-config`, `make`).
+
+Проверка окружения перед установкой:
+
+```bash
+python -V
+pip -V
+rustc -V
+cargo -V
 ```
 
 Далее шаги те же, что в «Быстрый старт».
+
+Если `pip install -e .` падает на `pydantic-core`, проверьте, что установлены пакеты из команды выше,
+и повторите установку после `pip install --upgrade pip setuptools wheel`.
 
 Рекомендации:
 
