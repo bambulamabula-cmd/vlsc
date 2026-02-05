@@ -81,6 +81,36 @@ def test_import_txt_file_support_and_duplicate_skip() -> None:
         assert second.json()["skipped_duplicates"] == 1
 
 
+def test_import_is_atomic_under_duplicate_concurrency() -> None:
+    uri = _make_uri("race.example.com", 443)
+
+    with TestClient(app) as client:
+        def _import_once() -> dict[str, int]:
+            response = client.post("/api/import", data={"uris_text": uri})
+            assert response.status_code == 200
+            payload = response.json()
+            return {
+                "created": payload["created"],
+                "skipped_duplicates": payload["skipped_duplicates"],
+            }
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda _: _import_once(), range(2)))
+
+    created_total = sum(item["created"] for item in results)
+    skipped_total = sum(item["skipped_duplicates"] for item in results)
+
+    assert created_total == 1
+    assert skipped_total == 1
+
+    session = SessionLocal()
+    try:
+        duplicates = session.query(Server).filter(Server.host == "race.example.com", Server.port == 443).all()
+        assert len(duplicates) == 1
+    finally:
+        session.close()
+
+
 def test_import_rejects_non_txt_file() -> None:
     with TestClient(app) as client:
         response = client.post(

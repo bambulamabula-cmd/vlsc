@@ -192,20 +192,45 @@ async def import_uris(
 
     created = 0
     skipped_duplicates = 0
+
+    pending_servers: list[Server] = []
+    seen_in_batch: set[tuple[str, int]] = set()
+    existing_pairs = {
+        (host, port)
+        for host, port in db.query(Server.host, Server.port).all()
+    }
+
     for item in parsed:
         host = item["host"]
         port = item["port"]
-        name = item.get("name") or f"{host}:{port}"
+        key = (host, port)
 
-        existing = db.query(Server).filter(Server.host == host, Server.port == port).first()
-        if existing:
+        if key in existing_pairs or key in seen_in_batch:
             skipped_duplicates += 1
             continue
 
-        db.add(Server(name=name, host=host, port=port, metadata_json=item))
-        created += 1
+        name = item.get("name") or f"{host}:{port}"
+        pending_servers.append(Server(name=name, host=host, port=port, metadata_json=item))
+        seen_in_batch.add(key)
 
-    db.commit()
+    if pending_servers:
+        db.add_all(pending_servers)
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            for server in pending_servers:
+                try:
+                    with db.begin():
+                        db.add(server)
+                        db.flush()
+                    created += 1
+                except IntegrityError:
+                    db.rollback()
+                    skipped_duplicates += 1
+        else:
+            created = len(pending_servers)
+            db.commit()
 
     return {
         "accepted": len(parsed),
