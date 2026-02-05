@@ -2,7 +2,7 @@ import socket
 
 import pytest
 
-from app.checks.netprobe import classify_error, phase_a_dns_tcp, tcp_probe
+from app.checks.netprobe import HOST_COOLDOWN, TcpAttempt, classify_error, phase_a_dns_tcp, phase_b_multi_tcp, tcp_probe
 from app.checks.xray_adapter import XrayAdapter
 
 
@@ -98,3 +98,23 @@ def test_run_xray_check_still_catches_regular_exceptions(monkeypatch: pytest.Mon
 
     assert result.success is False
     assert result.error_message == "network down"
+
+
+def test_phase_b_cooldown_is_scoped_per_host_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    HOST_COOLDOWN._cooldown_until.clear()
+
+    monkeypatch.setattr(
+        "app.checks.netprobe.tcp_probe",
+        lambda *args, **kwargs: TcpAttempt(success=False, rtt_ms=None, error_type="timeout"),
+    )
+    monkeypatch.setattr("app.checks.netprobe.time.sleep", lambda *_: None)
+
+    first = phase_b_multi_tcp("example.com", 80, timeout_s=0.1, attempts=1, host_cooldown_s=60.0)
+    second = phase_b_multi_tcp("example.com", 443, timeout_s=0.1, attempts=1, host_cooldown_s=60.0)
+
+    assert first.attempts == 1
+    assert first.successes == 0
+    assert second.attempts == 1
+    assert second.successes == 0
+
+    HOST_COOLDOWN._cooldown_until.clear()

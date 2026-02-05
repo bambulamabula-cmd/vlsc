@@ -43,21 +43,22 @@ class PhaseBResult:
 
 class HostCooldown:
     def __init__(self) -> None:
-        self._cooldown_until: dict[str, float] = {}
+        self._cooldown_until: dict[tuple[str, int], float] = {}
         self._lock = Lock()
 
-    def in_cooldown(self, host: str) -> bool:
+    def in_cooldown(self, host: str, port: int) -> bool:
         now = time.monotonic()
+        key = (host, port)
         with self._lock:
-            until = self._cooldown_until.get(host, 0.0)
+            until = self._cooldown_until.get(key, 0.0)
             if until <= now:
-                self._cooldown_until.pop(host, None)
+                self._cooldown_until.pop(key, None)
                 return False
             return True
 
-    def set_cooldown(self, host: str, seconds: float) -> None:
+    def set_cooldown(self, host: str, port: int, seconds: float) -> None:
         with self._lock:
-            self._cooldown_until[host] = time.monotonic() + max(0.0, seconds)
+            self._cooldown_until[(host, port)] = time.monotonic() + max(0.0, seconds)
 
 
 HOST_COOLDOWN = HostCooldown()
@@ -121,7 +122,7 @@ def phase_b_multi_tcp(
     backoff_base_s: float = 0.1,
     host_cooldown_s: float = 30.0,
 ) -> PhaseBResult:
-    if HOST_COOLDOWN.in_cooldown(host):
+    if HOST_COOLDOWN.in_cooldown(host, port):
         return PhaseBResult(
             attempts=0,
             successes=0,
@@ -165,7 +166,7 @@ def phase_b_multi_tcp(
     total = len(samples)
 
     if successes == 0:
-        HOST_COOLDOWN.set_cooldown(host, host_cooldown_s)
+        HOST_COOLDOWN.set_cooldown(host, port, host_cooldown_s)
 
     jitter = None
     if len(success_rtts) >= 2:
