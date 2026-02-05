@@ -36,11 +36,13 @@ tests/
    python -m venv .venv
    source .venv/bin/activate
    ```
-4. Установите Python-зависимости:
+4. Установите Python-зависимости из манифеста проекта:
    ```bash
    pip install --upgrade pip
-   pip install fastapi uvicorn sqlalchemy pydantic pydantic-settings jinja2 pytest httpx
+   pip install -e .
+   pip install -e ".[dev]"
    ```
+   > Если нужны только runtime-зависимости, достаточно `pip install -e .`.
 5. Запустите приложение:
    ```bash
    uvicorn app.main:app --host 0.0.0.0 --port 8000
