@@ -1,0 +1,113 @@
+from __future__ import annotations
+
+from dataclasses import asdict
+from datetime import UTC, datetime
+
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from app.checks.confidence import ConfidenceInput, calculate_confidence
+from app.checks.netprobe import phase_a_dns_tcp, phase_b_multi_tcp
+from app.checks.scoring import explainable_score
+from app.config import settings
+from app.models import Check, DailyAggregate, Server
+from app.services.xray_pool import XrayPoolService
+
+
+class ScannerService:
+    def __init__(self, xray_pool: XrayPoolService | None = None) -> None:
+        self.xray_pool = xray_pool or XrayPoolService(max_workers=2)
+
+    def scan_server(self, db: Session, server: Server, attempts: int = 5) -> Check:
+        timeout_s = float(settings.check_timeout_seconds)
+
+        phase_a = phase_a_dns_tcp(server.host, server.port, timeout_s=timeout_s)
+        phase_b = phase_b_multi_tcp(server.host, server.port, timeout_s=timeout_s, attempts=attempts)
+        phase_c = self.xray_pool.check_http_via_xray(
+            server.host,
+            server.port,
+            enabled=settings.xray_enabled,
+            timeout_s=min(timeout_s, 8.0),
+        )
+
+        score = explainable_score(
+            success_rate=phase_b.success_rate,
+            median_latency_ms=phase_b.rtt_median_ms,
+            jitter_ms=phase_b.jitter_ms,
+            last_error=phase_a.error_type,
+        )
+
+        confidence_input = self._build_confidence_input(db, server.id, phase_b.successes, phase_b.attempts, phase_b.jitter_ms)
+        confidence = calculate_confidence(confidence_input)
+
+        status = "ok" if phase_a.success else "fail"
+        check = Check(
+            server_id=server.id,
+            status=status,
+            latency_ms=phase_b.rtt_median_ms or phase_a.rtt_ms,
+            error_message=phase_a.error_message,
+            details_json={
+                "phase_a": asdict(phase_a),
+                "phase_b": asdict(phase_b),
+                "phase_c": asdict(phase_c),
+                "score_explain": asdict(score),
+                "confidence": asdict(confidence),
+            },
+            score=score.total,
+            confidence=confidence.confidence,
+        )
+        db.add(check)
+        db.flush()
+
+        self._update_daily_aggregate(db, server.id)
+        db.commit()
+        db.refresh(check)
+        return check
+
+    def _build_confidence_input(
+        self,
+        db: Session,
+        server_id: int,
+        latest_successes: int,
+        latest_total: int,
+        jitter_ms: float | None,
+    ) -> ConfidenceInput:
+        previous_success = db.query(func.count(Check.id)).filter(Check.server_id == server_id, Check.status == "ok").scalar() or 0
+        previous_total = db.query(func.count(Check.id)).filter(Check.server_id == server_id).scalar() or 0
+        last_check = db.query(Check).filter(Check.server_id == server_id).order_by(Check.checked_at.desc()).first()
+
+        return ConfidenceInput(
+            success_count=previous_success + latest_successes,
+            total_count=previous_total + latest_total,
+            jitter_ms=jitter_ms,
+            last_checked_at=last_check.checked_at if last_check else None,
+            now=datetime.now(UTC),
+        )
+
+    def _update_daily_aggregate(self, db: Session, server_id: int) -> None:
+        today = datetime.now(UTC).date()
+        aggregate = (
+            db.query(DailyAggregate)
+            .filter(DailyAggregate.server_id == server_id, DailyAggregate.day == today)
+            .one_or_none()
+        )
+        checks = db.query(Check).filter(Check.server_id == server_id, func.date(Check.checked_at) == today).all()
+
+        checks_total = len(checks)
+        success_total = len([c for c in checks if c.status == "ok"])
+        latencies = [c.latency_ms for c in checks if c.latency_ms is not None]
+        avg_latency = (sum(latencies) / len(latencies)) if latencies else None
+
+        if aggregate is None:
+            aggregate = DailyAggregate(
+                server_id=server_id,
+                day=today,
+                checks_total=checks_total,
+                success_total=success_total,
+                avg_latency_ms=avg_latency,
+            )
+            db.add(aggregate)
+        else:
+            aggregate.checks_total = checks_total
+            aggregate.success_total = success_total
+            aggregate.avg_latency_ms = avg_latency
