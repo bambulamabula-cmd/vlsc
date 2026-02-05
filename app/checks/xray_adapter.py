@@ -8,6 +8,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from urllib import request
 
 
@@ -34,6 +35,7 @@ class XrayAdapter:
         self,
         target_host: str,
         target_port: int,
+        vless_config: dict[str, Any] | None = None,
         timeout_s: float = 8.0,
         enabled: bool = True,
     ) -> PhaseCResult:
@@ -49,9 +51,26 @@ class XrayAdapter:
                 error_message="xray binary is not available",
             )
 
-        return self._run_xray_check(target_host, target_port, timeout_s)
+        try:
+            normalized_vless = self._normalize_vless_config(vless_config)
+        except ValueError as exc:
+            return PhaseCResult(
+                enabled=True,
+                available=True,
+                success=False,
+                latency_ms=None,
+                error_message=f"phase_c_vless_config_error: {exc}",
+            )
 
-    def _run_xray_check(self, target_host: str, target_port: int, timeout_s: float) -> PhaseCResult:
+        return self._run_xray_check(target_host, target_port, normalized_vless, timeout_s)
+
+    def _run_xray_check(
+        self,
+        target_host: str,
+        target_port: int,
+        vless_config: dict[str, Any],
+        timeout_s: float,
+    ) -> PhaseCResult:
         inbound_port = self._free_port()
         config = {
             "inbounds": [
@@ -66,8 +85,23 @@ class XrayAdapter:
             "outbounds": [
                 {
                     "tag": "probe-out",
-                    "protocol": "freedom",
-                    "settings": {},
+                    "protocol": "vless",
+                    "settings": {
+                        "vnext": [
+                            {
+                                "address": vless_config["host"],
+                                "port": vless_config["port"],
+                                "users": [
+                                    {
+                                        "id": vless_config["id"],
+                                        "encryption": "none",
+                                        "flow": vless_config["flow"],
+                                    }
+                                ],
+                            }
+                        ]
+                    },
+                    "streamSettings": self._build_stream_settings(vless_config),
                 }
             ],
             "routing": {
@@ -111,6 +145,78 @@ class XrayAdapter:
                 )
             finally:
                 self._terminate_strict(proc, timeout_s)
+
+    @staticmethod
+    def _normalize_vless_config(vless_config: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(vless_config, dict):
+            raise ValueError("Server.metadata_json is missing")
+
+        query = vless_config.get("query")
+        if not isinstance(query, dict):
+            query = {}
+
+        normalized = {
+            "host": vless_config.get("host"),
+            "port": vless_config.get("port"),
+            "id": vless_config.get("id") or vless_config.get("uuid") or vless_config.get("user_id"),
+            "security": query.get("security") or vless_config.get("security"),
+            "network": query.get("type") or vless_config.get("network") or vless_config.get("type"),
+            "sni": query.get("sni") or query.get("serverName") or vless_config.get("sni") or vless_config.get("serverName"),
+            "fp": query.get("fp") or vless_config.get("fp"),
+            "flow": query.get("flow") or vless_config.get("flow"),
+            "ws_path": query.get("path") or vless_config.get("path"),
+            "ws_host": query.get("host") or vless_config.get("ws_host") or vless_config.get("host_header"),
+            "grpc_service_name": query.get("serviceName") or vless_config.get("serviceName"),
+        }
+
+        missing = [
+            key
+            for key in ("host", "port", "id", "security", "network", "sni", "fp", "flow")
+            if not normalized.get(key)
+        ]
+
+        if normalized.get("network") == "ws" and not normalized.get("ws_path"):
+            missing.append("path")
+        if normalized.get("network") == "grpc" and not normalized.get("grpc_service_name"):
+            missing.append("serviceName")
+
+        if missing:
+            missing_fields = ", ".join(sorted(set(missing)))
+            raise ValueError(f"required VLESS fields are missing: {missing_fields}")
+
+        try:
+            normalized["port"] = int(normalized["port"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("port must be an integer") from exc
+
+        return normalized
+
+    @staticmethod
+    def _build_stream_settings(vless_config: dict[str, Any]) -> dict[str, Any]:
+        security = str(vless_config["security"])
+        sni = str(vless_config["sni"])
+        fp = str(vless_config["fp"])
+        network = str(vless_config["network"])
+
+        stream_settings: dict[str, Any] = {
+            "security": security,
+            "network": network,
+        }
+
+        if security == "reality":
+            stream_settings["realitySettings"] = {"serverName": sni, "fingerprint": fp}
+        elif security != "none":
+            stream_settings["tlsSettings"] = {"serverName": sni, "fingerprint": fp}
+
+        if network == "ws":
+            ws_settings: dict[str, Any] = {"path": vless_config["ws_path"]}
+            if vless_config.get("ws_host"):
+                ws_settings["headers"] = {"Host": vless_config["ws_host"]}
+            stream_settings["wsSettings"] = ws_settings
+        elif network == "grpc":
+            stream_settings["grpcSettings"] = {"serviceName": vless_config["grpc_service_name"]}
+
+        return stream_settings
 
     @staticmethod
     def _terminate_strict(proc: subprocess.Popen[bytes], timeout_s: float) -> None:

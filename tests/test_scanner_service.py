@@ -152,7 +152,7 @@ def test_scan_server_fails_when_phase_a_success_but_phase_b_has_no_successes(mon
         monkeypatch.setattr(
             service.xray_pool,
             "check_http_via_xray",
-            lambda host, port, enabled, timeout_s: PhaseCResult(
+            lambda host, port, vless_config, enabled, timeout_s: PhaseCResult(
                 enabled=False,
                 available=False,
                 success=False,
@@ -218,7 +218,7 @@ def test_scan_server_with_previous_check_does_not_fail_confidence_datetime_math(
         monkeypatch.setattr(
             service.xray_pool,
             "check_http_via_xray",
-            lambda host, port, enabled, timeout_s: PhaseCResult(
+            lambda host, port, vless_config, enabled, timeout_s: PhaseCResult(
                 enabled=False,
                 available=False,
                 success=False,
@@ -306,7 +306,7 @@ def test_scan_server_xray_only_skips_phase_a_and_b(monkeypatch) -> None:
         monkeypatch.setattr(
             service.xray_pool,
             "check_http_via_xray",
-            lambda host, port, enabled, timeout_s: PhaseCResult(
+            lambda host, port, vless_config, enabled, timeout_s: PhaseCResult(
                 enabled=True,
                 available=True,
                 success=True,
@@ -343,7 +343,7 @@ def test_scan_server_xray_only_uses_phase_c_result_for_status_and_error(monkeypa
         monkeypatch.setattr(
             service.xray_pool,
             "check_http_via_xray",
-            lambda host, port, enabled, timeout_s: PhaseCResult(
+            lambda host, port, vless_config, enabled, timeout_s: PhaseCResult(
                 enabled=True,
                 available=True,
                 success=False,
@@ -357,5 +357,73 @@ def test_scan_server_xray_only_uses_phase_c_result_for_status_and_error(monkeypa
         assert check.status == "fail"
         assert check.score == 0
         assert check.error_message == "xray downstream timeout"
+    finally:
+        session.close()
+
+
+def test_scan_server_passes_server_metadata_to_xray_pool(monkeypatch) -> None:
+    session = SessionLocal()
+    try:
+        metadata = {
+            "host": "vless.example.com",
+            "port": 443,
+            "user_id": "11111111-1111-1111-1111-111111111111",
+            "query": {
+                "security": "tls",
+                "type": "tcp",
+                "sni": "vless.example.com",
+                "fp": "chrome",
+                "flow": "xtls-rprx-vision",
+            },
+        }
+        server = Server(name="srv", host="srv.example.com", port=443, metadata_json=metadata)
+        session.add(server)
+        session.commit()
+        session.refresh(server)
+
+        monkeypatch.setattr(
+            scanner_module,
+            "phase_a_dns_tcp",
+            lambda host, port, timeout_s: PhaseAResult(
+                success=True,
+                dns_ok=True,
+                ip="127.0.0.1",
+                rtt_ms=10.0,
+                error_type=None,
+                error_message=None,
+            ),
+        )
+        monkeypatch.setattr(
+            scanner_module,
+            "phase_b_multi_tcp",
+            lambda host, port, timeout_s, attempts: PhaseBResult(
+                attempts=attempts,
+                successes=attempts,
+                success_rate=1.0,
+                rtt_min_ms=10.0,
+                rtt_median_ms=12.0,
+                rtt_max_ms=14.0,
+                jitter_ms=1.0,
+                stopped_early=False,
+                samples=(10.0, 12.0, 14.0),
+            ),
+        )
+
+        captured = {}
+
+        def _capture(host, port, vless_config, enabled, timeout_s):
+            captured["host"] = host
+            captured["port"] = port
+            captured["vless_config"] = vless_config
+            return PhaseCResult(enabled=enabled, available=True, success=True, latency_ms=15.0, error_message=None)
+
+        service = ScannerService()
+        monkeypatch.setattr(service.xray_pool, "check_http_via_xray", _capture)
+
+        service.scan_server(session, server, attempts=3)
+
+        assert captured["host"] == server.host
+        assert captured["port"] == server.port
+        assert captured["vless_config"] == metadata
     finally:
         session.close()
