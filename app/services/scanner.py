@@ -40,12 +40,23 @@ class ScannerService:
         confidence_input = self._build_confidence_input(db, server.id, phase_b.successes, phase_b.attempts, phase_b.jitter_ms)
         confidence = calculate_confidence(confidence_input)
 
-        status = "ok" if phase_a.success else "fail"
+        # Business rule: check is "ok" only when phase A reaches host and
+        # phase B has at least one successful probe.
+        phase_b_has_success = phase_b.successes > 0 or phase_b.success_rate > 0.0
+        status = "ok" if phase_a.success and phase_b_has_success else "fail"
+
+        if status == "ok":
+            error_message = None
+        elif not phase_a.success:
+            error_message = phase_a.error_message
+        else:
+            error_message = "phase_b_has_no_successful_probes"
+
         check = Check(
             server_id=server.id,
             status=status,
             latency_ms=phase_b.rtt_median_ms or phase_a.rtt_ms,
-            error_message=phase_a.error_message,
+            error_message=error_message,
             details_json={
                 "phase_a": asdict(phase_a),
                 "phase_b": asdict(phase_b),
