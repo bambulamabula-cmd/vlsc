@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import get_db_session
@@ -17,13 +18,26 @@ from app.vless.parser import VlessParseError, parse_vless_uri
 router = APIRouter()
 templates = Jinja2Templates(directory="app/web/templates")
 
-SCAN_STATE: dict[str, object] = {
-    "running": False,
-    "mode": "quick",
-    "started_at": None,
-    "progress": 0,
-    "job_id": None,
-}
+def _scan_state_from_job(job: Job | None) -> dict[str, object]:
+    mode = "quick"
+    if job and job.payload and isinstance(job.payload, dict):
+        mode = str(job.payload.get("mode") or mode)
+
+    running = bool(job and job.status == "running")
+    started_at = job.started_at.isoformat() if running and job and job.started_at else None
+    progress = 1 if running else 100
+
+    return {
+        "running": running,
+        "mode": mode,
+        "started_at": started_at,
+        "progress": progress,
+        "job_id": job.id if running and job else None,
+    }
+
+
+def _active_scan_job(db: Session) -> Job | None:
+    return db.query(Job).filter(Job.kind == "scan", Job.status == "running").order_by(Job.id.desc()).first()
 
 
 def _latest_checks_map(db: Session, server_ids: list[int]) -> dict[int, Check]:
@@ -94,7 +108,7 @@ def dashboard(request: Request, db: Session = Depends(get_db_session)):
             "servers": items,
             "alive_total": len([s for s in items if s["alive"]]),
             "xray_total": len([s for s in items if s["xray_ok"] is True]),
-            "scan_state": SCAN_STATE,
+            "scan_state": _scan_state_from_job(_active_scan_job(db)),
         },
     )
 
@@ -107,7 +121,7 @@ def scan_page(request: Request, db: Session = Depends(get_db_session)):
         {
             "request": request,
             "title": "Scan Servers",
-            "scan_state": SCAN_STATE,
+            "scan_state": _scan_state_from_job(_active_scan_job(db)),
             "last_job": last_job,
         },
     )
@@ -191,37 +205,33 @@ async def import_uris(
 
 @router.post("/api/scan/start")
 def start_scan(mode: str = Form(default="quick"), db: Session = Depends(get_db_session)):
-    if SCAN_STATE["running"] is True:
-        raise HTTPException(status_code=409, detail="Scan already running")
-
     now = datetime.now(timezone.utc)
     job = Job(kind="scan", status="running", payload={"mode": mode}, started_at=now)
-    db.add(job)
-    db.commit()
-    db.refresh(job)
 
-    SCAN_STATE.update(
-        {
-            "running": True,
-            "mode": mode,
-            "started_at": now.isoformat(),
-            "progress": 1,
-            "job_id": job.id,
-        }
-    )
-    return {"job_id": job.id, "scan_state": SCAN_STATE}
+    try:
+        with db.begin():
+            db.add(job)
+            db.flush()
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail="Scan already running") from None
+
+    db.refresh(job)
+    return {"job_id": job.id, "scan_state": _scan_state_from_job(job)}
 
 
 @router.post("/api/scan/stop")
 def stop_scan(db: Session = Depends(get_db_session)):
-    running_job = db.query(Job).filter(Job.kind == "scan", Job.status == "running").order_by(Job.id.desc()).first()
+    running_job = _active_scan_job(db)
     if running_job:
         running_job.status = "stopped"
         running_job.finished_at = datetime.now(timezone.utc)
         db.commit()
+        db.refresh(running_job)
 
-    SCAN_STATE.update({"running": False, "progress": 100})
-    return {"scan_state": SCAN_STATE, "stopped_job_id": running_job.id if running_job else None}
+    return {
+        "scan_state": _scan_state_from_job(_active_scan_job(db)),
+        "stopped_job_id": running_job.id if running_job else None,
+    }
 
 
 @router.get("/api/servers")
