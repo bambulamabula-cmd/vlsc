@@ -444,3 +444,23 @@ def test_scan_stop_interrupts_further_servers(monkeypatch) -> None:
         session.close()
 
     assert len(processed_hosts) < 3
+
+
+def test_dashboard_escapes_imported_server_name() -> None:
+    dangerous_name = '<img src=x onerror=alert(1)>'
+    dangerous_uri = f"vless://{uuid4()}@xss.example.com:443?security=tls&type=ws#{dangerous_name}"
+
+    with TestClient(app) as client:
+        imported = client.post('/api/import', data={'uris_text': dangerous_uri})
+        assert imported.status_code == 200
+
+        api_response = client.get('/api/servers')
+        assert api_response.status_code == 200
+        names = [item['name'] for item in api_response.json()['items']]
+        assert dangerous_name in names
+
+        dashboard = client.get('/')
+        assert dashboard.status_code == 200
+        assert dangerous_name not in dashboard.text
+        assert '&lt;img src=x onerror=alert(1)&gt;' in dashboard.text
+        assert '<script>alert(1)</script>' not in dashboard.text

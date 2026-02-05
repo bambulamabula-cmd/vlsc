@@ -70,15 +70,35 @@
     const response = await fetch(`/api/servers?${params.toString()}`);
     const payload = await response.json();
     const rows = document.getElementById('serverRows');
-    rows.innerHTML = payload.items.map((server) => `
-      <tr class="border-t border-slate-200 dark:border-slate-800">
-        <td class="py-2"><a class="text-blue-500" href="/servers/${server.id}">${server.name}</a></td>
-        <td>${server.host}:${server.port}</td>
-        <td>${server.alive ? '✅' : '❌'}</td>
-        <td>${server.xray_ok ? '✅' : '—'}</td>
-        <td>${server.score ?? '—'}</td>
-      </tr>
-    `).join('');
+    rows.textContent = '';
+
+    payload.items.forEach((server) => {
+      const row = document.createElement('tr');
+      row.className = 'border-t border-slate-200 dark:border-slate-800';
+
+      const nameCell = document.createElement('td');
+      nameCell.className = 'py-2';
+      const link = document.createElement('a');
+      link.className = 'text-blue-500';
+      link.href = `/servers/${encodeURIComponent(String(server.id))}`;
+      link.textContent = server.name ?? '';
+      nameCell.appendChild(link);
+
+      const hostCell = document.createElement('td');
+      hostCell.textContent = `${server.host}:${server.port}`;
+
+      const aliveCell = document.createElement('td');
+      aliveCell.textContent = server.alive ? '✅' : '❌';
+
+      const xrayCell = document.createElement('td');
+      xrayCell.textContent = server.xray_ok ? '✅' : '—';
+
+      const scoreCell = document.createElement('td');
+      scoreCell.textContent = server.score ?? '—';
+
+      row.append(nameCell, hostCell, aliveCell, xrayCell, scoreCell);
+      rows.appendChild(row);
+    });
   });
 </script>
 {% endblock %}
