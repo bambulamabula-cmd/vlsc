@@ -4,11 +4,13 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.db import init_db
+from app.utils.logging import configure_logging
 from app.web.routes import router as web_router
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    configure_logging()
     init_db()
     yield
 

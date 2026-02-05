@@ -1,8 +1,66 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="card">
-  <h2>Server scan</h2>
-  <p>Start a lightweight scan from your mobile-first panel.</p>
-  <button class="btn">Start scan</button>
+<section class="rounded-2xl bg-white p-4 shadow-sm dark:bg-slate-900">
+  <h2 class="text-lg font-semibold">Scan control</h2>
+  <p class="mt-1 text-sm text-slate-500">Start/stop checks with selectable mode and live state.</p>
+  <div class="mt-3 flex flex-wrap items-center gap-2">
+    <select id="mode" class="rounded border border-slate-300 bg-transparent px-2 py-1 dark:border-slate-700">
+      <option value="quick">Quick</option>
+      <option value="full">Full</option>
+      <option value="xray_only">Xray only</option>
+    </select>
+    <button id="startScan" class="rounded bg-blue-600 px-3 py-1 text-white">Start</button>
+    <button id="stopScan" class="rounded bg-rose-600 px-3 py-1 text-white">Stop</button>
+  </div>
+  <div class="mt-3">
+    <div class="mb-1 text-sm">Progress: <span id="progressText">{{ scan_state.progress }}%</span></div>
+    <div class="h-2 overflow-hidden rounded bg-slate-200 dark:bg-slate-800"><div id="progressBar" class="h-full bg-blue-500" style="width: {{ scan_state.progress }}%"></div></div>
+  </div>
+  <pre id="scanState" class="mt-3 rounded bg-slate-100 p-2 text-xs dark:bg-slate-950">{{ scan_state }}</pre>
+  <p id="scanMessage" class="mt-2 text-sm text-slate-500"></p>
 </section>
+
+<section class="rounded-2xl bg-white p-4 shadow-sm dark:bg-slate-900">
+  <h3 class="text-lg font-semibold">Retention cleanup</h3>
+  <form action="/api/retention/cleanup" method="post" class="mt-2 grid gap-2 sm:max-w-sm">
+    <label class="text-sm">Raw checks days (7-30): <input type="number" name="raw_days" min="7" max="30" value="30" class="w-full rounded border border-slate-300 bg-transparent px-2 py-1 dark:border-slate-700" /></label>
+    <label class="text-sm">Aggregates days (up to 365): <input type="number" name="aggregate_days" min="30" max="365" value="365" class="w-full rounded border border-slate-300 bg-transparent px-2 py-1 dark:border-slate-700" /></label>
+    <label class="text-sm"><input type="checkbox" name="vacuum" checked /> VACUUM after cleanup</label>
+    <button class="w-fit rounded bg-amber-600 px-3 py-1 text-white">Run cleanup</button>
+  </form>
+</section>
+
+<script>
+  const scanState = document.getElementById('scanState');
+  const scanMessage = document.getElementById('scanMessage');
+  const progressBar = document.getElementById('progressBar');
+  const progressText = document.getElementById('progressText');
+
+  function renderState(payload) {
+    const state = payload.scan_state || payload;
+    scanState.textContent = JSON.stringify(state, null, 2);
+    progressBar.style.width = `${state.progress ?? 0}%`;
+    progressText.textContent = `${state.progress ?? 0}%`;
+  }
+
+  document.getElementById('startScan')?.addEventListener('click', async () => {
+    const mode = document.getElementById('mode').value;
+    const body = new URLSearchParams({ mode });
+    const response = await fetch('/api/scan/start', { method: 'POST', body });
+    const payload = await response.json();
+    if (!response.ok) {
+      scanMessage.textContent = payload.detail || 'Unable to start scan';
+      return;
+    }
+    scanMessage.textContent = `Scan started (job #${payload.job_id})`;
+    renderState(payload);
+  });
+
+  document.getElementById('stopScan')?.addEventListener('click', async () => {
+    const response = await fetch('/api/scan/stop', { method: 'POST' });
+    const payload = await response.json();
+    scanMessage.textContent = payload.stopped_job_id ? `Stopped job #${payload.stopped_job_id}` : 'No running scan job';
+    renderState(payload);
+  });
+</script>
 {% endblock %}
