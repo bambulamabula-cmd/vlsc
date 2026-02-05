@@ -137,3 +137,18 @@ cargo -V
 - Фоновые процессы в Android/Termux могут быть ограничены системой.
 - SQLite может стать узким местом при высокой параллельности.
 - Долгие фоновые задачи лучше запускать с внешним watchdog/рестартом.
+
+
+## Xray / Phase C (VLESS)
+
+Phase C использует `Server.metadata_json`, который сохраняется при импорте URI (`parse_vless_uri`).
+Для успешной проверки должны быть заполнены поля VLESS-конфига:
+
+- базовые: `host`, `port`, `user_id` (UUID),
+- query-параметры: `security`, `type`, `sni`, `fp`, `flow`,
+- дополнительные по транспорту:
+  - для `type=ws`: обязателен `path` (и при необходимости `host` для WS Host header),
+  - для `type=grpc`: обязателен `serviceName`.
+
+Если обязательные поля отсутствуют, phase C завершится с диагностичной ошибкой
+`phase_c_vless_config_error: required VLESS fields are missing: ...`.

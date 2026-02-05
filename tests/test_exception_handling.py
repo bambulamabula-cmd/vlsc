@@ -77,8 +77,19 @@ def test_run_xray_check_does_not_catch_keyboard_interrupt(monkeypatch: pytest.Mo
     adapter = XrayAdapter()
     adapter.xray_path = "xray"
 
+    vless_config = {
+        "host": "example.com",
+        "port": 443,
+        "id": "11111111-1111-1111-1111-111111111111",
+        "security": "tls",
+        "network": "tcp",
+        "sni": "example.com",
+        "fp": "chrome",
+        "flow": "xtls-rprx-vision",
+    }
+
     with pytest.raises(KeyboardInterrupt):
-        adapter._run_xray_check("example.com", 80, timeout_s=1.0)
+        adapter._run_xray_check("example.com", 80, vless_config=vless_config, timeout_s=1.0)
 
 
 def test_run_xray_check_still_catches_regular_exceptions(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
@@ -94,7 +105,18 @@ def test_run_xray_check_still_catches_regular_exceptions(monkeypatch: pytest.Mon
     adapter = XrayAdapter()
     adapter.xray_path = "xray"
 
-    result = adapter._run_xray_check("example.com", 80, timeout_s=1.0)
+    vless_config = {
+        "host": "example.com",
+        "port": 443,
+        "id": "11111111-1111-1111-1111-111111111111",
+        "security": "tls",
+        "network": "tcp",
+        "sni": "example.com",
+        "fp": "chrome",
+        "flow": "xtls-rprx-vision",
+    }
+
+    result = adapter._run_xray_check("example.com", 80, vless_config=vless_config, timeout_s=1.0)
 
     assert result.success is False
     assert result.error_message == "network down"

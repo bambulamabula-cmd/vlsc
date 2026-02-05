@@ -34,6 +34,7 @@ class ScannerService:
         phase_c = self.xray_pool.check_http_via_xray(
             server.host,
             server.port,
+            vless_config=server.metadata_json,
             enabled=settings.xray_enabled,
             timeout_s=min(timeout_s, 8.0),
         )
