@@ -70,6 +70,36 @@ def test_import_and_servers_listing() -> None:
         assert body["items"][0]["host"] in {"alpha.example.com", "beta.example.com"}
 
 
+
+def test_servers_listing_total_and_top_with_filters() -> None:
+    session = SessionLocal()
+    try:
+        alpha = Server(name="Alpha", host="alpha-list.example.com", port=443)
+        beta = Server(name="Beta", host="beta-list.example.com", port=443)
+        gamma = Server(name="Gamma", host="gamma-list.example.com", port=443)
+        session.add_all([alpha, beta, gamma])
+        session.flush()
+
+        session.add_all(
+            [
+                Check(server_id=alpha.id, status="ok", details_json={"phase_c": {"success": True}}, score=90),
+                Check(server_id=beta.id, status="ok", details_json={"phase_c": {"success": True}}, score=70),
+                Check(server_id=gamma.id, status="fail", details_json={"phase_c": {"success": False}}, score=10),
+            ]
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    with TestClient(app) as client:
+        response = client.get("/api/servers?alive=true&sort=name_asc&top=1")
+        assert response.status_code == 200
+        payload = response.json()
+
+    assert payload["total"] == 2
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["name"] == "Alpha"
+
 def test_import_rejects_empty_payload() -> None:
     with TestClient(app) as client:
         response = client.post("/api/import", data={"uris_text": "   "})
