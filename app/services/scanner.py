@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -59,7 +59,7 @@ class ScannerService:
         db.add(check)
         db.flush()
 
-        self._update_daily_aggregate(db, server.id)
+        self._update_daily_aggregate(db, check)
         db.commit()
         db.refresh(check)
         return check
@@ -84,14 +84,44 @@ class ScannerService:
             now=datetime.now(timezone.utc),
         )
 
-    def _update_daily_aggregate(self, db: Session, server_id: int) -> None:
-        today = datetime.now(timezone.utc).date()
+    def _update_daily_aggregate(self, db: Session, check: Check) -> None:
+        day = check.checked_at.date()
         aggregate = (
             db.query(DailyAggregate)
-            .filter(DailyAggregate.server_id == server_id, DailyAggregate.day == today)
+            .filter(DailyAggregate.server_id == check.server_id, DailyAggregate.day == day)
             .one_or_none()
         )
-        checks = db.query(Check).filter(Check.server_id == server_id, func.date(Check.checked_at) == today).all()
+
+        if aggregate is None:
+            aggregate = DailyAggregate(
+                server_id=check.server_id,
+                day=day,
+                checks_total=1,
+                success_total=1 if check.status == "ok" else 0,
+                avg_latency_ms=check.latency_ms,
+            )
+            db.add(aggregate)
+        else:
+            previous_checks_total = aggregate.checks_total
+            aggregate.checks_total += 1
+            aggregate.success_total += 1 if check.status == "ok" else 0
+
+            if check.latency_ms is not None:
+                if aggregate.avg_latency_ms is None or previous_checks_total == 0:
+                    aggregate.avg_latency_ms = check.latency_ms
+                else:
+                    aggregate.avg_latency_ms = aggregate.avg_latency_ms + (
+                        check.latency_ms - aggregate.avg_latency_ms
+                    ) / (previous_checks_total + 1)
+
+    def recompute_daily_aggregate(self, db: Session, server_id: int, day: date) -> DailyAggregate:
+        """Recovery-only full recomputation of daily aggregate from checks table."""
+        aggregate = (
+            db.query(DailyAggregate)
+            .filter(DailyAggregate.server_id == server_id, DailyAggregate.day == day)
+            .one_or_none()
+        )
+        checks = db.query(Check).filter(Check.server_id == server_id, func.date(Check.checked_at) == day).all()
 
         checks_total = len(checks)
         success_total = len([c for c in checks if c.status == "ok"])
@@ -101,7 +131,7 @@ class ScannerService:
         if aggregate is None:
             aggregate = DailyAggregate(
                 server_id=server_id,
-                day=today,
+                day=day,
                 checks_total=checks_total,
                 success_total=success_total,
                 avg_latency_ms=avg_latency,
@@ -111,3 +141,5 @@ class ScannerService:
             aggregate.checks_total = checks_total
             aggregate.success_total = success_total
             aggregate.avg_latency_ms = avg_latency
+
+        return aggregate
