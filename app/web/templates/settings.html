@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="rounded-2xl bg-white p-4 shadow-sm dark:bg-slate-900">
+  <h2 class="text-lg font-semibold">Application settings</h2>
+  <p class="mt-1 text-sm text-slate-500">Все настройки доступны через UI. Изменения сохраняются в БД и применяются сразу (для sqlite_path требуется рестарт).</p>
+
+  {% if saved %}
+  <div class="mt-3 rounded border border-emerald-400/50 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-500">Settings saved.</div>
+  {% endif %}
+  {% if error %}
+  <div class="mt-3 rounded border border-rose-400/50 bg-rose-500/10 px-3 py-2 text-sm text-rose-500">{{ error }}</div>
+  {% endif %}
+
+  <form id="settingsForm" class="mt-4 grid gap-3 sm:max-w-xl">
+    {% for field in settings_fields %}
+      <label class="text-sm">
+        <span class="mb-1 block font-medium">{{ field.name }}</span>
+        {% if field.type == "bool" %}
+          <select name="{{ field.name }}" class="w-full rounded border border-slate-300 bg-transparent px-2 py-1 dark:border-slate-700">
+            <option value="true" {% if field.value %}selected{% endif %}>true</option>
+            <option value="false" {% if not field.value %}selected{% endif %}>false</option>
+          </select>
+        {% elif field.type == "int" %}
+          <input type="number" name="{{ field.name }}" value="{{ field.value }}" class="w-full rounded border border-slate-300 bg-transparent px-2 py-1 dark:border-slate-700" />
+        {% else %}
+          <input type="text" name="{{ field.name }}" value="{{ field.value }}" class="w-full rounded border border-slate-300 bg-transparent px-2 py-1 dark:border-slate-700" />
+        {% endif %}
+        <span class="mt-1 block text-xs text-slate-500">Default: {{ field.default }}{% if field.requires_restart %} · restart required{% endif %}</span>
+      </label>
+    {% endfor %}
+
+    <button class="w-fit rounded bg-blue-600 px-3 py-1 text-white">Save settings</button>
+    <p id="saveMessage" class="text-sm text-slate-500"></p>
+  </form>
+</section>
+
+<script>
+  document.getElementById('settingsForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const response = await fetch('/api/settings', { method: 'POST', body: new FormData(form) });
+    const payload = await response.json();
+    const msg = document.getElementById('saveMessage');
+    if (!response.ok) {
+      msg.textContent = payload.detail || 'Unable to save settings';
+      msg.className = 'text-sm text-rose-500';
+      return;
+    }
+    msg.textContent = 'Settings saved';
+    msg.className = 'text-sm text-emerald-500';
+  });
+</script>
+{% endblock %}

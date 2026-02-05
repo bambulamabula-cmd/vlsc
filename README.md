@@ -92,6 +92,7 @@ export VLSC_XRAY_ENABLED=true
 - `GET /health` — health-check.
 - `GET /` — dashboard.
 - `GET /scan` — страница запуска/контроля сканирования.
+- `GET /settings` — страница управления всеми настройками приложения.
 - `GET /servers/{id}` — страница деталей сервера.
 - `POST /api/import` — импорт URI (`uris_text` и/или `uris_file`, `.txt` до 1 MiB).
 - `GET /api/servers` — список серверов (`alive`, `xray`, `top`, `sort`).
@@ -101,6 +102,7 @@ export VLSC_XRAY_ENABLED=true
 - `GET /api/jobs/{job_id}` — статус задачи.
 - `GET /api/export` — экспорт серверов в CSV.
 - `POST /api/retention/cleanup` — очистка и агрегация истории.
+- `POST /api/settings` — обновление runtime-настроек через web UI.
 
 ## Termux (Android)
 
@@ -152,3 +154,10 @@ Phase C использует `Server.metadata_json`, который сохран
 
 Если обязательные поля отсутствуют, phase C завершится с диагностичной ошибкой
 `phase_c_vless_config_error: required VLESS fields are missing: ...`.
+
+
+## Настройки через Web UI
+
+Все поля из `app/config.py` доступны на странице `/settings`.
+Изменения сохраняются в БД (`app_settings`) и применяются сразу для runtime-параметров.
+Для `sqlite_path` требуется перезапуск процесса приложения.

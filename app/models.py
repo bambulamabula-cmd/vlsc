@@ -121,6 +121,25 @@ class Job(Base):
         return normalize_utc_naive(value)
 
 
+
+
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow_naive, onupdate=utcnow_naive, nullable=False
+    )
+
+    @validates("updated_at")
+    def _normalize_updated_at(self, _key: str, value: datetime) -> datetime:
+        normalized = normalize_utc_naive(value)
+        if normalized is None:
+            raise ValueError("updated_at cannot be None")
+        return normalized
+
 class DailyAggregate(Base):
     __tablename__ = "daily_aggregates"
     __table_args__ = (UniqueConstraint("server_id", "day", name="uq_daily_server_day"),)
