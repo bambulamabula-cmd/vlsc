@@ -38,15 +38,19 @@ class RetentionService:
 
         db.commit()
 
+        vacuum_ran = False
         if run_vacuum:
-            # SQLite VACUUM must run outside a transaction.
-            with db.bind.connect() as conn:
-                conn.execute(text("VACUUM"))
+            bind = db.bind
+            if bind is not None and bind.dialect.name == "sqlite":
+                # SQLite VACUUM must run outside a transaction.
+                with bind.connect() as conn:
+                    conn.execution_options(isolation_level="AUTOCOMMIT").execute(text("VACUUM"))
+                vacuum_ran = True
 
         return {
             "deleted_checks": int(deleted_checks),
             "deleted_aggregates": int(deleted_aggregates),
-            "vacuum": run_vacuum,
+            "vacuum": vacuum_ran,
             "raw_checks_days": raw_checks_days,
             "aggregate_days": aggregate_days,
         }
